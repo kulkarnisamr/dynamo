@@ -117,9 +117,7 @@ helm install dynamo-platform dynamo-platform-$RELEASE_VERSION.tgz \
 > ```
 
 > [!WARNING]
-> **Namespace-restricted mode** (`namespaceRestriction.enabled=true`) is only for development and
-> testing. It is not supported for production. Install it with `--skip-crds` and
-> `dynamo-operator.upgradeCRD=false`; see [Dynamo Operator](dynamo-operator.md#namespace-restricted-mode).
+> **Namespace-restricted mode** (`namespaceRestriction.enabled=true`) is only for development and testing. It is not supported for production. Use the default cluster-wide mode for production deployments.
 
 Verify the Dynamo platform is running:
 
@@ -248,8 +246,7 @@ Found existing namespace-restricted Dynamo operators in namespaces: ...
 
 Cause: Attempting cluster-wide install on a shared cluster with existing namespace-restricted operators.
 
-Solution: Remove the development/test namespace-restricted operators, then install one cluster-wide
-operator for production use.
+Solution: Remove the development/test namespace-restricted operators, then install one cluster-wide operator for production use.
 
 **CRDs already exist**
 

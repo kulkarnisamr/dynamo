@@ -69,6 +69,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/controller"
 	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/gpu"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/modelendpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/namespace_scope"
@@ -277,7 +278,6 @@ func main() {
 	}
 
 	restrictedNamespace := operatorCfg.Namespace.Restricted
-	isClusterWide := restrictedNamespace == ""
 	if restrictedNamespace != "" {
 		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
 			restrictedNamespace: {},
@@ -291,10 +291,10 @@ func main() {
 
 		banner := strings.Repeat("=", 80)
 		setupLog.Error(nil, banner)
-		setupLog.Error(nil, "DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production.")
-		setupLog.Error(nil, "The operator is running in namespace-restricted mode",
+		setupLog.Error(nil, "DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production")
+		setupLog.Error(nil, "The operator is running with namespace-restricted reconciliation",
 			"namespace", restrictedNamespace)
-		setupLog.Error(nil, "Use cluster-wide mode for production deployments.")
+		setupLog.Error(nil, "Use cluster-wide mode for production deployments")
 		setupLog.Error(nil, banner)
 	} else {
 		setupLog.Info("No restricted namespace configured, launching in cluster-wide mode")
@@ -309,96 +309,55 @@ func main() {
 	setupLog.Info("Initializing observability metrics")
 	observability.InitMetrics()
 
-	// Set up webhook certificate management.
-	// A direct (non-cached) client is needed because the manager's cache isn't started yet.
-	directClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: crdScheme})
-	if err != nil {
-		setupLog.Error(err, "unable to create direct client for cert management")
-		os.Exit(1)
-	}
-	certMgr, err := internalcert.NewCertManager(directClient, &operatorCfg.Server.Webhook)
-	if err != nil {
-		setupLog.Error(err, "unable to create cert manager")
-		os.Exit(1)
-	}
-	// Auto mode runs one synchronous certificate refresh with the direct client,
-	// then registers the cert-controller with the not-yet-started manager.
-	if err = certMgr.SetupAndRunOnce(mainCtx, mgr); err != nil {
-		setupLog.Error(err, "failed to setup webhook certificate management")
-		os.Exit(1)
+	// Only the cluster-wide operator owns webhook certificates and registrations.
+	var directClient client.Client
+	var certMgr *internalcert.CertManager
+	if restrictedNamespace == "" {
+		directClient, err = client.New(mgr.GetConfig(), client.Options{Scheme: crdScheme})
+		if err != nil {
+			setupLog.Error(err, "unable to create direct client for cert management")
+			os.Exit(1)
+		}
+		certMgr, err = internalcert.NewCertManager(directClient, &operatorCfg.Server.Webhook)
+		if err != nil {
+			setupLog.Error(err, "unable to create cert manager")
+			os.Exit(1)
+		}
+		if err = certMgr.SetupAndRunOnce(mainCtx, mgr); err != nil {
+			setupLog.Error(err, "failed to setup webhook certificate management")
+			os.Exit(1)
+		}
+	} else {
+		kubeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "unable to create client for admission capability check")
+			os.Exit(1)
+		}
+		if err = namespace_scope.RequireClusterWideAdmissionCapability(mainCtx, kubeClient); err != nil {
+			setupLog.Error(err, "namespaced mode requires compatible cluster-wide admission")
+			os.Exit(1)
+		}
 	}
 
-	// Initialize namespace scope mechanism
+	// Leases transfer reconciliation ownership. Cluster-wide admission consumes
+	// their feature snapshots but never delegates validation.
 	var leaseManager *namespace_scope.LeaseManager
 	var leaseWatcher *namespace_scope.LeaseWatcher
-
 	if restrictedNamespace != "" {
-		// Namespace-restricted mode: Create and maintain namespace scope marker lease
-		setupLog.Info("Creating namespace scope marker lease manager",
-			"namespace", restrictedNamespace,
-			"leaseDuration", operatorCfg.Namespace.Scope.LeaseDuration.Duration,
-			"renewInterval", operatorCfg.Namespace.Scope.LeaseRenewInterval.Duration)
-
-		leaseManager, err = namespace_scope.NewLeaseManager(
-			mgr.GetConfig(),
-			restrictedNamespace,
-			operatorVersion,
-			operatorCfg.Namespace.Scope.LeaseDuration.Duration,
-			operatorCfg.Namespace.Scope.LeaseRenewInterval.Duration,
-		)
-		if err != nil {
-			setupLog.Error(err, "unable to create namespace scope marker lease manager")
-			os.Exit(1)
-		}
-
-		// Start the lease manager
-		if err = leaseManager.Start(mainCtx); err != nil {
-			setupLog.Error(err, "unable to start namespace scope marker lease manager")
-			os.Exit(1)
-		}
-
-		// Monitor for fatal lease errors
-		// If lease renewal fails repeatedly, we must exit to prevent split-brain
-		go func() {
-			select {
-			case err := <-leaseManager.Errors():
-				setupLog.Error(err, "FATAL: Lease manager encountered unrecoverable error, shutting down to prevent split-brain")
-				os.Exit(1)
-			case <-mainCtx.Done():
-				// Normal shutdown, error channel monitoring no longer needed
-				return
-			}
-		}()
-
-		// Ensure lease is released on shutdown
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := leaseManager.Stop(shutdownCtx); err != nil {
-				setupLog.Error(err, "failed to stop lease manager cleanly")
-			}
-		}()
-
-		setupLog.Info("Namespace scope marker lease manager started successfully")
+		setupLog.Info("Admission capability verified; delaying the reconciliation Lease until feature detection completes")
 	} else {
-		// Cluster-wide mode: Watch for namespace scope marker leases
-		setupLog.Info("Setting up namespace scope marker lease watcher for cluster-wide mode")
+		setupLog.Info("Setting up namespace reconciliation lease watcher")
 
 		leaseWatcher, err = namespace_scope.NewLeaseWatcher(mgr.GetConfig())
 		if err != nil {
-			setupLog.Error(err, "unable to create namespace scope marker lease watcher")
+			setupLog.Error(err, "unable to create namespace reconciliation lease watcher")
 			os.Exit(1)
 		}
-
-		// Start the lease watcher
 		if err = leaseWatcher.Start(mainCtx); err != nil {
-			setupLog.Error(err, "unable to start namespace scope marker lease watcher")
+			setupLog.Error(err, "unable to start namespace reconciliation lease watcher")
 			os.Exit(1)
 		}
 
-		setupLog.Info("Namespace scope marker lease watcher started successfully")
-
-		// Pass leaseWatcher to runtime config for namespace exclusion filtering
 		runtimeConfig.ExcludedNamespaces = leaseWatcher
 	}
 
@@ -542,6 +501,54 @@ func main() {
 		"istio", runtimeConfig.IstioEnabled,
 	)
 
+	admissionGates := features.Gates{
+		GMSSnapshot:      os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1",
+		Checkpoint:       operatorCfg.Checkpoint.Enabled,
+		Grove:            runtimeConfig.GroveEnabled,
+		LWS:              runtimeConfig.LWSEnabled,
+		KaiScheduler:     runtimeConfig.KaiSchedulerEnabled,
+		VolcanoScheduler: runtimeConfig.VolcanoSchedulerEnabled,
+		DRA:              runtimeConfig.DRAEnabled,
+		Istio:            runtimeConfig.IstioEnabled,
+		GPUDiscovery:     ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
+	}
+	if restrictedNamespace != "" {
+		leaseManager, err = namespace_scope.NewLeaseManager(
+			mgr.GetConfig(),
+			restrictedNamespace,
+			operatorVersion,
+			operatorCfg.Namespace.Scope.LeaseDuration.Duration,
+			operatorCfg.Namespace.Scope.LeaseRenewInterval.Duration,
+			admissionGates,
+		)
+		if err != nil {
+			setupLog.Error(err, "unable to create namespace reconciliation lease manager")
+			os.Exit(1)
+		}
+		if err = leaseManager.Start(mainCtx); err != nil {
+			setupLog.Error(err, "unable to start namespace reconciliation lease manager")
+			os.Exit(1)
+		}
+		go func() {
+			select {
+			case err := <-leaseManager.Errors():
+				setupLog.Error(err, "FATAL: namespace reconciliation lease renewal failed")
+				os.Exit(1)
+			case <-mainCtx.Done():
+				return
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := leaseManager.Stop(shutdownCtx); err != nil {
+				setupLog.Error(err, "failed to release namespace reconciliation lease")
+			}
+		}()
+	} else {
+		internalwebhook.SetValidationResolver(features.NewResolver(admissionGates, leaseWatcher.AdmissionGateSnapshot))
+	}
+
 	dockerSecretRetriever := secrets.NewDockerSecretIndexer(mgr.GetAPIReader(), restrictedNamespace)
 	// refresh whenever a secret is created/deleted/updated
 	// Set up informer
@@ -649,44 +656,47 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := registerWebhookHandlers(mgr, operatorCfg, runtimeConfig, operatorVersion); err != nil {
-		setupLog.Error(err, "failed to register webhooks")
-		os.Exit(1)
+	if restrictedNamespace == "" {
+		if err := registerWebhookHandlers(mgr, operatorCfg, runtimeConfig, operatorVersion); err != nil {
+			setupLog.Error(err, "failed to register webhooks")
+			os.Exit(1)
+		}
 	}
 
-	// CertManager.SetupAndRunOnce has already bootstrapped auto-mode TLS secrets.
-	// Auto mode patches admission and, for cluster-wide operators, conversion CAs.
-	// Manual mode patches only cluster-wide conversion CAs; admission stays out-of-band.
-	caInjector, err := internalcert.NewCABundleInjector(directClient, operatorCfg)
-	if err != nil {
-		setupLog.Error(err, "unable to create CA bundle injector")
-		os.Exit(1)
-	}
-	if operatorCfg.Server.Webhook.CertProvisionMode == configv1alpha1.CertProvisionModeAuto {
-		if isClusterWide {
-			err = caInjector.InjectAll(mainCtx)
-		} else {
-			err = caInjector.InjectAdmission(mainCtx)
-		}
+	// CertManager.SetupAndRunOnce has already bootstrapped auto-mode TLS
+	// secrets before this point. Auto mode can therefore patch admission and
+	// conversion CAs immediately; manual mode waits for externally provided
+	// ca.crt and only patches conversion, leaving admission CA management
+	// out-of-band.
+	if restrictedNamespace == "" {
+		caInjector, err := internalcert.NewCABundleInjector(directClient, operatorCfg)
 		if err != nil {
-			setupLog.Error(err, "failed to inject CA bundles into webhook configurations")
+			setupLog.Error(err, "unable to create CA bundle injector")
 			os.Exit(1)
 		}
-	} else if isClusterWide {
-		// Manual mode gets webhook CA material out-of-band. Missing ca.crt
-		// blocks startup instead of running with unauthenticated conversion.
-		if err := caInjector.InjectCRDConversionCA(mainCtx); err != nil {
-			setupLog.Error(err, "failed to inject CRD conversion CA bundle")
-			os.Exit(1)
+		if operatorCfg.Server.Webhook.CertProvisionMode == configv1alpha1.CertProvisionModeAuto {
+			if err := caInjector.InjectAll(mainCtx); err != nil {
+				setupLog.Error(err, "failed to inject CA bundles into webhook configurations")
+				os.Exit(1)
+			}
+		} else {
+			// Manual mode gets webhook CA material out-of-band. Missing ca.crt
+			// blocks startup instead of running with unauthenticated conversion.
+			if err := caInjector.InjectCRDConversionCA(mainCtx); err != nil {
+				setupLog.Error(err, "failed to inject CRD conversion CA bundle")
+				os.Exit(1)
+			}
 		}
 	}
 
 	// mgr.Start reads tls.crt and tls.key from the projected Secret volume
 	// synchronously. Secret API updates are not enough because kubelet projects
 	// them into already-running pods asynchronously.
-	if err := certMgr.WaitForMountedCertificate(mainCtx); err != nil {
-		setupLog.Error(err, "failed waiting for mounted webhook TLS certificate")
-		os.Exit(1)
+	if certMgr != nil {
+		if err := certMgr.WaitForMountedCertificate(mainCtx); err != nil {
+			setupLog.Error(err, "failed waiting for mounted webhook TLS certificate")
+			os.Exit(1)
+		}
 	}
 
 	// Kubernetes propagates webhook configuration asynchronously, especially
@@ -797,6 +807,7 @@ func registerControllers(
 		if err = controller.NewFailoverCascadeReconciler(
 			mgr.GetClient(),
 			mgr.GetEventRecorderFor("gms-failover-cascade"),
+			runtimeConfig,
 		).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("unable to create GMS FailoverCascade controller: %w", err)
 		}
@@ -822,16 +833,66 @@ func registerWebhookHandlers(
 	runtimeConfig *commonController.RuntimeConfig,
 	operatorVersion string,
 ) error {
-	isClusterWide := operatorCfg.Namespace.Restricted == ""
-	if isClusterWide {
-		setupLog.Info("Configuring webhooks with lease-based namespace exclusion for cluster-wide mode")
-		internalwebhook.SetExcludedNamespaces(runtimeConfig.ExcludedNamespaces)
-	} else {
-		setupLog.Info("Configuring webhooks for namespace-restricted mode (no lease checking)",
-			"restrictedNamespace", operatorCfg.Namespace.Restricted)
-		internalwebhook.SetExcludedNamespaces(nil)
+	if operatorCfg.Namespace.Restricted != "" {
+		return fmt.Errorf("defaulting, mutation, and conversion webhooks can only be registered by the cluster-wide operator")
+	}
+	if err := registerValidationWebhookHandlers(mgr, operatorCfg, runtimeConfig); err != nil {
+		return err
 	}
 
+	if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest conversion webhook: %w", err)
+	}
+
+	if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeployment{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeployment conversion webhook: %w", err)
+	}
+
+	if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoComponentDeployment{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to register DynamoComponentDeployment conversion webhook: %w", err)
+	}
+
+	if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeploymentScalingAdapter{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeploymentScalingAdapter conversion webhook: %w", err)
+	}
+
+	setupLog.Info("Registering defaulting webhooks")
+
+	dcdDefaulter := webhookdefaulting.NewDCDDefaulter()
+	if err := dcdDefaulter.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoComponentDeployment defaulting webhook: %w", err)
+	}
+
+	dgdDefaulter := webhookdefaulting.NewDGDDefaulter(operatorVersion, runtimeConfig.GroveEnabled)
+	if err := dgdDefaulter.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeployment defaulting webhook: %w", err)
+	}
+
+	dgdrDefaulter := webhookdefaulting.NewDGDRDefaulter(operatorVersion)
+	if err := dgdrDefaulter.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest defaulting webhook: %w", err)
+	}
+
+	setupLog.Info("Registering mutation webhooks")
+
+	podCheckpointRestoreMutator := webhookmutation.NewPodCheckpointRestoreMutator(mgr.GetClient(), operatorCfg)
+	if err := podCheckpointRestoreMutator.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register Pod checkpoint restore mutating webhook: %w", err)
+	}
+
+	setupLog.Info("Webhooks registered successfully")
+	return nil
+}
+
+func registerValidationWebhookHandlers(
+	mgr ctrl.Manager,
+	operatorCfg *configv1alpha1.OperatorConfiguration,
+	runtimeConfig *commonController.RuntimeConfig,
+) error {
 	var operatorPrincipal string
 	if sa, ns := os.Getenv("POD_SERVICE_ACCOUNT"), os.Getenv("POD_NAMESPACE"); sa != "" && ns != "" {
 		operatorPrincipal = fmt.Sprintf("system:serviceaccount:%s:%s", ns, sa)
@@ -871,58 +932,12 @@ func registerWebhookHandlers(
 	}
 
 	dgdrHandler := webhookvalidation.NewDynamoGraphDeploymentRequestHandler(
-		isClusterWide, ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
+		operatorCfg.Namespace.Restricted == "", ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
 	)
 	if err := dgdrHandler.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest webhook: %w", err)
 	}
 
-	if isClusterWide {
-		if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}).
-			Complete(); err != nil {
-			return fmt.Errorf("unable to register DynamoGraphDeploymentRequest conversion webhook: %w", err)
-		}
-
-		if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeployment{}).
-			Complete(); err != nil {
-			return fmt.Errorf("unable to register DynamoGraphDeployment conversion webhook: %w", err)
-		}
-
-		if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoComponentDeployment{}).
-			Complete(); err != nil {
-			return fmt.Errorf("unable to register DynamoComponentDeployment conversion webhook: %w", err)
-		}
-
-		if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeploymentScalingAdapter{}).
-			Complete(); err != nil {
-			return fmt.Errorf("unable to register DynamoGraphDeploymentScalingAdapter conversion webhook: %w", err)
-		}
-	}
-
-	setupLog.Info("Registering defaulting webhooks")
-
-	dcdDefaulter := webhookdefaulting.NewDCDDefaulter()
-	if err := dcdDefaulter.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoComponentDeployment defaulting webhook: %w", err)
-	}
-
-	dgdDefaulter := webhookdefaulting.NewDGDDefaulter(operatorVersion, runtimeConfig.GroveEnabled)
-	if err := dgdDefaulter.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoGraphDeployment defaulting webhook: %w", err)
-	}
-
-	dgdrDefaulter := webhookdefaulting.NewDGDRDefaulter(operatorVersion)
-	if err := dgdrDefaulter.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest defaulting webhook: %w", err)
-	}
-
-	setupLog.Info("Registering mutation webhooks")
-
-	podCheckpointRestoreMutator := webhookmutation.NewPodCheckpointRestoreMutator(mgr.GetClient(), operatorCfg)
-	if err := podCheckpointRestoreMutator.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register Pod checkpoint restore mutating webhook: %w", err)
-	}
-
-	setupLog.Info("Webhooks registered successfully")
+	setupLog.Info("Validation webhooks registered successfully")
 	return nil
 }

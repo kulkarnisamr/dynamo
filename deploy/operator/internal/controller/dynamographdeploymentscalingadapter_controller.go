@@ -181,7 +181,10 @@ func (r *DynamoGraphDeploymentScalingAdapterReconciler) SetupWithManager(mgr ctr
 			}),
 		).
 		WithEventFilter(commonController.EphemeralDeploymentEventFilter(r.Config, r.RuntimeConfig)).
-		Complete(observability.NewObservedReconciler(r, consts.ResourceTypeDynamoGraphDeploymentScalingAdapter))
+		Complete(commonController.WithNamespaceExclusion(
+			observability.NewObservedReconciler(r, consts.ResourceTypeDynamoGraphDeploymentScalingAdapter),
+			r.RuntimeConfig,
+		))
 }
 
 // findAdaptersForDGD maps DGD changes to adapter reconcile requests.

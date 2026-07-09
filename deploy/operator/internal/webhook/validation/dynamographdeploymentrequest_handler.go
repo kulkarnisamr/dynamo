@@ -23,6 +23,7 @@ import (
 
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/observability"
 	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,7 +71,8 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateCreate(ctx context.Context
 	logger.Info("validate create", "name", request.Name, "namespace", request.Namespace)
 
 	// Create validator and perform validation
-	validator := NewDynamoGraphDeploymentRequestValidator(request, h.isClusterWideOperator, h.gpuDiscoveryEnabled)
+	isClusterWide, gpuDiscoveryEnabled := h.effectiveGPUDiscovery(ctx)
+	validator := NewDynamoGraphDeploymentRequestValidator(request, isClusterWide, gpuDiscoveryEnabled)
 	return validator.Validate()
 }
 
@@ -101,7 +103,8 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateUpdate(ctx context.Context
 	}
 
 	// Create validator and perform validation
-	validator := NewDynamoGraphDeploymentRequestValidator(newRequest, h.isClusterWideOperator, h.gpuDiscoveryEnabled)
+	isClusterWide, gpuDiscoveryEnabled := h.effectiveGPUDiscovery(ctx)
+	validator := NewDynamoGraphDeploymentRequestValidator(newRequest, isClusterWide, gpuDiscoveryEnabled)
 	return validator.ValidateUpdate(oldRequest)
 }
 
@@ -124,14 +127,19 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateDelete(ctx context.Context
 	return nil, nil
 }
 
+func (h *DynamoGraphDeploymentRequestHandler) effectiveGPUDiscovery(ctx context.Context) (bool, bool) {
+	if gates, ok := features.FromContext(ctx); ok {
+		return false, gates.GPUDiscovery
+	}
+	return h.isClusterWideOperator, h.gpuDiscoveryEnabled
+}
+
 // RegisterWithManager registers the webhook with the manager.
-// The handler is automatically wrapped with LeaseAwareValidator to add namespace exclusion logic.
 func (h *DynamoGraphDeploymentRequestHandler) RegisterWithManager(mgr manager.Manager) error {
-	// Wrap the handler with lease-aware logic for cluster-wide coordination
-	leaseAwareValidator := internalwebhook.NewLeaseAwareValidator(h, internalwebhook.GetExcludedNamespaces())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.ValidationResolver())
 
 	// Wrap with metrics collection
-	observedValidator := observability.NewObservedValidator(leaseAwareValidator, consts.ResourceTypeDynamoGraphDeploymentRequest)
+	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoGraphDeploymentRequest)
 
 	webhook := admission.
 		WithCustomValidator(mgr.GetScheme(), &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}, observedValidator).

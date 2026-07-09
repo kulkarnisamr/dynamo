@@ -121,9 +121,11 @@ spec:
         - containerPort: 8080
           name: metrics
           protocol: TCP
+        {{- if not .Values.namespaceRestriction.enabled }}
         - containerPort: 9443
           name: webhook-server
           protocol: TCP
+        {{- end }}
         readinessProbe:
           httpGet:
             path: /readyz
@@ -138,9 +140,11 @@ spec:
         - mountPath: /etc/dynamo-operator
           name: operator-config
           readOnly: true
+        {{- if not .Values.namespaceRestriction.enabled }}
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
+        {{- end }}
       securityContext:
         runAsNonRoot: true
       serviceAccountName: {{ include "dynamo-operator.fullname" . }}-controller-manager
@@ -149,6 +153,7 @@ spec:
       - name: operator-config
         configMap:
           name: {{ include "dynamo-operator.fullname" . }}-config
+      {{- if not .Values.namespaceRestriction.enabled }}
       - name: cert
         secret:
           defaultMode: 420
@@ -156,3 +161,4 @@ spec:
           # Allow the pod to start before the secret exists so the
           # in-operator cert-controller can bootstrap it at runtime.
           optional: true
+      {{- end }}

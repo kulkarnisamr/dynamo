@@ -1251,7 +1251,7 @@ func (r *DynamoComponentDeploymentReconciler) SetupWithManager(mgr ctrl.Manager)
 	m.Owns(&autoscalingv2.HorizontalPodAutoscaler{})
 	// Wrap with metrics collection
 	observedReconciler := observability.NewObservedReconciler(r, commonconsts.ResourceTypeDynamoComponentDeployment)
-	return m.Complete(observedReconciler)
+	return m.Complete(commonController.WithNamespaceExclusion(observedReconciler, r.RuntimeConfig))
 }
 
 func (r *DynamoComponentDeploymentReconciler) GetRecorder() record.EventRecorder {

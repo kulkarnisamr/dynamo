@@ -38,6 +38,25 @@ type ExcludedNamespacesInterface interface {
 	Contains(namespace string) bool
 }
 
+// IsNamespaceExcluded reports whether cluster-wide reconciliation is disabled
+// for a namespace by a namespaced operator installation.
+func IsNamespaceExcluded(runtimeConfig *RuntimeConfig, namespace string) bool {
+	return namespace != "" && runtimeConfig != nil && runtimeConfig.ExcludedNamespaces != nil &&
+		runtimeConfig.ExcludedNamespaces.Contains(namespace)
+}
+
+// ShouldSkipReconciliation applies the namespace exclusion guard to a queued request.
+func ShouldSkipReconciliation(ctx context.Context, runtimeConfig *RuntimeConfig, namespace string) bool {
+	if !IsNamespaceExcluded(runtimeConfig, namespace) {
+		return false
+	}
+	log.FromContext(ctx).V(1).Info(
+		"Skipping reconciliation because namespace is managed by a namespaced operator",
+		"namespace", namespace,
+	)
+	return true
+}
+
 // DetectGroveAvailability checks if Grove is available by checking if the Grove API group is registered
 func DetectGroveAvailability(ctx context.Context, mgr ctrl.Manager) bool {
 	return detectAPIGroupAvailability(ctx, mgr, "grove.io", nil)
@@ -208,32 +227,18 @@ func GetKubeDiscoveryMode(annotations map[string]string) configv1alpha1.KubeDisc
 }
 
 // EphemeralDeploymentEventFilter returns a predicate that filters events based on namespace configuration.
-func EphemeralDeploymentEventFilter(config *configv1alpha1.OperatorConfiguration, runtimeConfig *RuntimeConfig) predicate.Predicate {
+func EphemeralDeploymentEventFilter(config *configv1alpha1.OperatorConfiguration, _ *RuntimeConfig) predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
-		return NamespaceAllowed(config, runtimeConfig, o, o.GetNamespace())
+		return NamespaceAllowed(config, o.GetNamespace())
 	})
 }
 
 // NamespaceAllowed reports whether the operator should process an event whose logical namespace is
-// namespace, applying restricted-namespace, excluded-namespace, and ephemeral filtering. Callers
-// filtering cluster-scoped resources pass the namespace of the namespaced object the event acts for
-// (e.g. a PodSnapshotContent's bound PodSnapshot); o is used only for diagnostic logging.
-func NamespaceAllowed(config *configv1alpha1.OperatorConfiguration, runtimeConfig *RuntimeConfig, o client.Object, namespace string) bool {
+// namespace. Callers filtering cluster-scoped resources pass the namespace of the namespaced object
+// the event acts for, such as a PodSnapshotContent's bound PodSnapshot.
+func NamespaceAllowed(config *configv1alpha1.OperatorConfiguration, namespace string) bool {
 	if config.Namespace.Restricted != "" {
-		// in case of a restricted namespace, we only want to process the events that are in the restricted namespace
 		return namespace == config.Namespace.Restricted
 	}
-
-	// Namespace exclusion filters new events, not requests already in the reconcile queue.
-	// This best-effort isolation is acceptable for the development-and-testing-only mode.
-	if runtimeConfig.ExcludedNamespaces != nil && runtimeConfig.ExcludedNamespaces.Contains(namespace) {
-		log.FromContext(context.Background()).V(1).Info("Skipping resource - namespace is excluded",
-			"namespace", namespace,
-			"resource", o.GetName(),
-			"kind", o.GetObjectKind().GroupVersionKind().Kind)
-		return false
-	}
-
-	// in all other cases, discard the event if it is destined to an ephemeral deployment
 	return !strings.Contains(namespace, "ephemeral")
 }

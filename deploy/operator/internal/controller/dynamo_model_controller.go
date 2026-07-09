@@ -267,7 +267,10 @@ func (r *DynamoModelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		WithEventFilter(commoncontroller.EphemeralDeploymentEventFilter(r.Config, r.RuntimeConfig)). // set the event filter to ignore resources handled by other controllers in namespace-restricted mode
-		Complete(observability.NewObservedReconciler(r, consts.ResourceTypeDynamoModel))
+		Complete(commoncontroller.WithNamespaceExclusion(
+			observability.NewObservedReconciler(r, consts.ResourceTypeDynamoModel),
+			r.RuntimeConfig,
+		))
 }
 
 // findModelsForEndpointSlice maps an EndpointSlice to DynamoModels

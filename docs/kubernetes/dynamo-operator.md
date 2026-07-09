@@ -30,13 +30,11 @@ Dynamo operator is a Kubernetes operator that simplifies the deployment, configu
 
 ## Deployment Modes
 
-The Dynamo operator has one supported production mode and one development/test mode.
+The Dynamo operator has one supported production mode and two development/test configurations:
 
-### Cluster-Wide Mode
+### 1. Cluster-Wide Mode (Default, Recommended)
 
 The operator monitors and manages DynamoGraph resources across **all namespaces** in the cluster.
-It owns the cluster-wide Custom Resource Definitions (CRDs), conversion webhook, and conversion
-certificate authority (CA). Deploy exactly one cluster-wide operator per cluster.
 
 **When to Use:**
 
@@ -44,46 +42,71 @@ certificate authority (CA). Deploy exactly one cluster-wide operator per cluster
 - You want centralized management of all Dynamo workloads
 - Standard production deployment on a dedicated cluster
 
-### Namespace-Restricted Mode
+---
+
+### 2. Namespace-Scoped Mode (Development and Testing Only)
 
 > [!WARNING]
-> Namespace-restricted mode is only for development and testing. It is not supported for production.
+> Namespace-scoped mode (`namespaceRestriction.enabled=true`) is not supported for production. Use it only for development and testing.
 
-A namespace-restricted operator reconciles, validates, and mutates resources only in its target
-namespace. It creates a Lease that makes the cluster-wide operator skip reconciliation and
-admission in that namespace. The namespace-restricted operator serves its own admission webhooks
-using its local feature settings.
+The operator monitors and manages DynamoGraph resources **only in a specific namespace**. A Lease claim makes the cluster-wide reconciler stand down there and publishes the namespaced operator's effective feature gates. The cluster-wide operator continues to serve all admission and conversion webhooks.
 
-Use this mode to test controller changes or feature settings in one namespace on a development
-cluster. It is not a multi-tenancy boundary.
+**When to Use:**
+
+- You want to test a new operator version in isolation
+- You are developing controller behavior in one namespace
+
+**Installation:**
+
+```bash
+helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
+  --namespace my-namespace \
+  --create-namespace \
+  --skip-crds \
+  --set dynamo-operator.namespaceRestriction.enabled=true \
+  --set dynamo-operator.upgradeCRD=false
+```
+
+The namespaced operator starts only when the global validating webhook advertises support
+for Lease-based feature gates. It does not create or serve admission, conversion, or
+defaulting webhooks and does not manage webhook certificates.
+
+---
+
+### 3. Cluster-Wide Plus Namespace-Scoped Mode (Development and Testing Only)
+
+> [!WARNING]
+> This configuration is not supported for production. Use a single cluster-wide operator in production.
+
+A **cluster-wide operator** manages most namespaces in a development cluster, while **one or more namespace-scoped operators** run in specific namespaces for testing. The cluster-wide operator automatically detects and excludes namespaces with namespace-scoped operators using lease markers.
+
+**When to Use:**
+
+- Testing new operator versions in isolated namespaces on a development cluster
+- Developing or testing controller feature gates in one namespace
 
 **How It Works:**
 
-1. The namespace-restricted operator creates a Lease named `dynamo-operator-namespace-scope`.
-2. The cluster-wide operator watches these Leases and skips the claimed namespace.
-3. The namespace-restricted ValidatingWebhookConfiguration and MutatingWebhookConfiguration select
-   only the target namespace.
-4. The namespace-restricted operator manages the TLS certificate and CA bundles for its own
-   admission configurations.
-5. The cluster-wide operator remains the only owner of CRDs, conversion, and conversion CA bundles.
-
-If the namespace-restricted Pod becomes unavailable, Lease expiration lets the cluster-wide operator
-resume reconciliation, but does not remove the namespace-restricted webhook configurations. Admission
-continues to target the unavailable Service. Recover the Pod to restore namespace-restricted admission,
-or uninstall the release to remove its webhook configurations. Cluster-wide admission resumes after the
-Lease is deleted or expires.
+1. Namespace-scoped operator creates a lease named `dynamo-operator-namespace-scope` in its namespace
+2. Cluster-wide operator watches for these lease markers across all namespaces
+3. Cluster-wide operator excludes reconciliation for any namespace with a lease marker
+4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease
+5. If the namespace-scoped operator stops, its lease expires and cluster-wide reconciliation resumes
 
 > [!CAUTION]
-> Pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false`. Helm installs the chart's `crds/`
-> directory before rendering templates, so the chart cannot detect a missing `--skip-crds` flag.
+> Always pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false` for a namespaced operator.
+> Helm installs the chart's `crds/` directory before rendering templates, so the chart cannot detect
+> a missing `--skip-crds` flag.
+
+**Setup Example:**
 
 ```bash
-# Install the cluster-wide operator first
+# 1. Install the cluster-wide operator in a development cluster
 helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace dynamo-system \
   --create-namespace
 
-# Install a namespace-restricted operator for development or testing
+# 2. Install namespace-scoped operator (testing, v2.0.0-beta)
 helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace test-namespace \
   --create-namespace \
@@ -93,16 +116,10 @@ helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.controllerManager.manager.image.tag=v2.0.0-beta
 ```
 
-Set `dynamo-operator.namespaceRestriction.targetNamespace` when the target differs from the Helm
-release namespace.
-
-Install every operator Helm release in a separate namespace. Multiple Dynamo operator releases in
-the same Helm release namespace are not supported.
-
-Run the same operator version in parallel whenever possible. The cluster-wide operator should be
-the same version or newer and must provide the newest APIs in the cluster. A newer namespaced
-controller can be used for development when it does not require CRD fields absent from the
-cluster-wide installation.
+Run the same operator version in parallel whenever possible. Mixing versions is strongly
+discouraged. Otherwise, the cluster-wide operator should be newer and ship the newest APIs.
+For controller development, a newer namespaced operator may run if its code remains
+compatible with the cluster-wide CRDs and global webhooks.
 
 **Observability:**
 
@@ -201,8 +218,7 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz --namespace 
 ```
 
 > [!NOTE]
-> Namespace-restricted mode is only for development and testing. Use cluster-wide mode for
-> production deployments.
+> Namespace-scoped configurations are only for development and testing and are not supported for production. See [Deployment Modes](#deployment-modes).
 
 ### Building from Source
 

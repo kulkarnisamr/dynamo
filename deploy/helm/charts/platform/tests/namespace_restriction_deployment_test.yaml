@@ -16,7 +16,7 @@ tests:
           path: kind
           value: Deployment
 
-  - it: rejects CRD upgrades in namespace-restricted mode
+  - it: rejects CRD upgrades in namespaced mode
     template: charts/dynamo-operator/templates/deployment.yaml
     set:
       dynamo-operator.namespaceRestriction.enabled: true
@@ -25,7 +25,7 @@ tests:
       - failedTemplate:
           errorPattern: "namespaceRestriction.enabled=true is incompatible with upgradeCRD=true"
 
-  - it: omits crd-apply but retains admission serving in namespace-restricted mode
+  - it: omits crd-apply and webhook serving in namespaced mode
     template: charts/dynamo-operator/templates/deployment.yaml
     set:
       dynamo-operator.namespaceRestriction.enabled: true
@@ -36,20 +36,23 @@ tests:
         documentSelector:
           path: kind
           value: Deployment
-      - equal:
-          path: spec.template.spec.containers[0].ports[1].name
-          value: webhook-server
+      - notExists:
+          path: spec.template.spec.containers[0].ports[1]
         documentSelector:
           path: kind
           value: Deployment
-      - equal:
-          path: spec.template.spec.containers[0].volumeMounts[1].name
-          value: cert
+      - notExists:
+          path: spec.template.spec.containers[0].volumeMounts[1]
+        documentSelector:
+          path: kind
+          value: Deployment
+      - notExists:
+          path: spec.template.spec.volumes[1]
         documentSelector:
           path: kind
           value: Deployment
 
-  - it: configures the target namespace and ownership Lease
+  - it: configures the reconciliation lease
     template: charts/dynamo-operator/templates/operator-config.yaml
     set:
       dynamo-operator.namespaceRestriction.enabled: true
@@ -68,9 +71,20 @@ tests:
           path: data["config.yaml"]
           pattern: 'leaseRenewInterval: "15s"'
 
-  - it: rejects custom webhook namespace selectors
+  - it: rejects webhook namespace selectors for the cluster-wide installation
     template: charts/dynamo-operator/templates/deployment.yaml
     set:
+      dynamo-operator.namespaceRestriction.enabled: false
+      dynamo-operator.webhook.namespaceSelector.matchLabels.tenant: selected
+    asserts:
+      - failedTemplate:
+          errorPattern: "webhook.namespaceSelector must be empty"
+
+  - it: rejects webhook namespace selectors for a namespaced installation
+    template: charts/dynamo-operator/templates/deployment.yaml
+    set:
+      dynamo-operator.namespaceRestriction.enabled: true
+      dynamo-operator.upgradeCRD: false
       dynamo-operator.webhook.namespaceSelector.matchLabels.tenant: selected
     asserts:
       - failedTemplate:

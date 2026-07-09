@@ -43,37 +43,77 @@ The Dynamo Platform Helm chart deploys the complete Dynamo Kubernetes Platform i
 
 ### Webhooks are now mandatory (v1.0.0+)
 
-The `webhook.enabled` Helm value has been removed. Admission webhooks are now a required component of the operator and cannot be disabled. This change aligns with the upcoming addition of CRD conversion webhooks, which are mandatory for multi-version API support.
+The `webhook.enabled` Helm value has been removed. Admission and conversion webhooks are
+required and cannot be disabled on the cluster-wide operator. Namespaced operators serve
+no webhooks. Conversion, defaulting, mutation, and validation always use the cluster-wide
+operator's implementation.
 
 No action is required for most upgrades — the operator's built-in cert-controller automatically generates and rotates TLS certificates at startup. If you use cert-manager or externally managed certificates, ensure your existing configuration is correct before upgrading.
 
 ---
 
-## ⚠️ Important: Cluster-Wide and Namespace-Restricted Deployment
+## ⚠️ Cluster-Wide and Namespaced Operators
 
-Deploy one cluster-wide operator per cluster. It owns the Custom Resource Definitions (CRDs),
-conversion webhook, and conversion certificate authority (CA).
+Exactly one cluster-wide Dynamo operator must own the cluster-wide API. It installs or
+updates the CRDs and owns global conversion, defaulting, mutation, and validation.
+Multiple cluster-wide installations are rejected.
 
-> [!WARNING]
-> Namespace-restricted mode is only for development and testing. It is not supported for production.
+> **DEVELOPMENT AND TESTING ONLY:** Namespace-restricted mode is not supported for
+> production.
 
-A namespace-restricted operator owns reconciliation, validation, and mutation only in its target
-namespace. Its Lease makes the cluster-wide operator skip that namespace. Install it alongside an
-existing cluster-wide operator with CRD management disabled:
+Namespaced operators reconcile only their target namespace and renew a namespace-scoped
+Lease that makes the cluster-wide operator's reconcilers hold off. The Lease publishes their
+effective feature gates. CRD schema and CEL validation still apply, while admission and
+conversion are always served globally by the cluster-wide operator.
 
-```bash
-helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
-  --namespace test-namespace \
+### DEVELOPMENT AND TESTING ONLY: Installing a Namespaced Operator
+
+> **CRITICAL: Always pass `--skip-crds` and set `upgradeCRD=false`.** Helm processes a
+> chart's `crds/` directory before rendering templates, so the chart cannot validate or
+> infer `--skip-crds`. Omitting it can install cluster-wide CRDs from the namespaced
+> release. The chart rejects namespaced installations with `upgradeCRD=true`, but it
+> cannot detect a missing `--skip-crds` flag.
+
+```shell
+helm install tenant-dynamo . \
+  --namespace my-tenant-namespace \
   --create-namespace \
   --skip-crds \
   --set dynamo-operator.namespaceRestriction.enabled=true \
   --set dynamo-operator.upgradeCRD=false
 ```
 
-The cluster-wide operator should run the same or a newer version and provide the newest APIs in the
-cluster. A newer namespaced controller can be used for development when it remains compatible with
-the installed CRDs. Helm rejects namespace-restricted installations with `upgradeCRD=true` and
-rejects custom `webhook.namespaceSelector` values.
+`namespaceRestriction.targetNamespace` may be set when the reconciliation target differs
+from the Helm release namespace. The namespaced operator does not create or serve webhooks.
+It publishes its complete effective feature-gate snapshot in the reconciliation Lease, and
+the cluster-wide validator applies that snapshot to requests in the namespace. The
+namespaced operator refuses to start unless global admission advertises support for this
+protocol.
+
+Running different operator versions in parallel is strongly discouraged; use the same
+version whenever possible. Otherwise, the cluster-wide operator should be newer and ship
+the newest APIs. For development, newer namespaced controller code may run only while it
+remains compatible with the cluster-wide CRDs and global webhooks.
+
+The namespaced release never runs `crd-apply` or serves admission or conversion webhooks.
+On shutdown it releases its reconciliation Lease; after an ungraceful shutdown the Lease
+expires, allowing cluster-wide reconciliation to resume.
+
+When upgrading an existing deployment, upgrade the cluster-wide release first and then
+each namespaced release. Remove any configured `webhook.namespaceSelector` before the
+upgrade and set `upgradeCRD=false` on every namespaced release. The existing Lease name
+and timing values remain compatible. The cluster-wide validating webhook must advertise
+Lease feature-gate support before a namespaced operator starts.
+
+### Validation and Safety
+
+- **Single cluster-wide owner**: installation fails if another cluster-wide operator exists.
+- **No namespaced CRD upgrades**: `namespaceRestriction.enabled=true` with
+  `upgradeCRD=true` is rejected.
+- **Global webhook scope**: setting `webhook.namespaceSelector` causes installation to fail.
+- **Reconciliation leases**: cluster-wide reconcilers skip namespaces with an active
+  namespaced-operator Lease. Global validation applies the feature gates from that Lease;
+  CRD schema/CEL, defaulting, mutation, and conversion continue to apply.
 
 ## 🔧 Configuration
 
@@ -105,12 +145,12 @@ Kubernetes: `>=1.30.0-0`
 | dynamo-operator.natsAddr | string | `""` | NATS server address for operator communication (leave empty to use the bundled NATS chart). Format: `nats://hostname:4222` |
 | dynamo-operator.etcdAddr | string | `""` | etcd server address for an external etcd instance. Only needed when using external etcd without the bundled subchart. Format: `http://hostname:2379` or `https://hostname:2379` |
 | dynamo-operator.modelExpressURL | string | `""` | URL for the Model Express server if not deployed by this helm chart. This is ignored if Model Express server is installed by this helm chart (global.model-express.enabled is true). |
-| dynamo-operator.namespaceRestriction | object | `{"enabled":false,"lease":{"duration":"30s","renewInterval":"10s"},"targetNamespace":null}` | DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode for production deployments. |
-| dynamo-operator.namespaceRestriction.enabled | bool | `false` | DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation and admission. Not supported for production. |
-| dynamo-operator.namespaceRestriction.targetNamespace | string | `nil` | DEVELOPMENT AND TESTING ONLY: Target namespace. Defaults to the Helm release namespace. |
-| dynamo-operator.namespaceRestriction.lease | object | `{"duration":"30s","renewInterval":"10s"}` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease settings. |
-| dynamo-operator.namespaceRestriction.lease.duration | string | `"30s"` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease duration. |
-| dynamo-operator.namespaceRestriction.lease.renewInterval | string | `"10s"` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease renewal interval. |
+| dynamo-operator.namespaceRestriction | object | `{"enabled":false,"lease":{"duration":"30s","renewInterval":"10s"},"targetNamespace":null}` | DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode (the default) for production deployments. |
+| dynamo-operator.namespaceRestriction.enabled | bool | `false` | DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production. |
+| dynamo-operator.namespaceRestriction.targetNamespace | string | `nil` | DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace. |
+| dynamo-operator.namespaceRestriction.lease | object | `{"duration":"30s","renewInterval":"10s"}` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode. |
+| dynamo-operator.namespaceRestriction.lease.duration | string | `"30s"` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease duration. |
+| dynamo-operator.namespaceRestriction.lease.renewInterval | string | `"10s"` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease renewal interval. |
 | dynamo-operator.gpuDiscovery | object | `{"enabled":true}` | DEVELOPMENT AND TESTING ONLY: GPU discovery settings for namespace-restricted operators. |
 | dynamo-operator.gpuDiscovery.enabled | bool | `true` | DEVELOPMENT AND TESTING ONLY: Enable GPU discovery in namespace-restricted mode. |
 | dynamo-operator.controllerManager.tolerations | list | `[]` | Node tolerations for controller manager pods |
@@ -153,7 +193,7 @@ Kubernetes: `>=1.30.0-0`
 | dynamo-operator.webhook.failurePolicy | string | `"Fail"` | Webhook failure policy controls how Kubernetes handles requests when the webhook is unavailable. 'Fail' (recommended for production) rejects requests if the webhook cannot be reached, ensuring strict validation. 'Ignore' allows requests through if the webhook is unavailable, providing availability over validation guarantees. |
 | dynamo-operator.webhook.podCheckpointRestoreFailurePolicy | string | `"Ignore"` | Failure policy for the Pod CREATE checkpoint-restore mutating webhook. Defaults to Ignore so a webhook outage falls back to cold-start instead of blocking workload Pods. |
 | dynamo-operator.webhook.timeoutSeconds | int | `10` | Timeout in seconds for webhook validation calls. If the webhook doesn't respond within this time, the request will be handled according to the failurePolicy. |
-| dynamo-operator.webhook.namespaceSelector | object | `{}` | Unsupported; must remain empty. Helm configures global admission for the cluster-wide operator and target-namespace admission for restricted operators. |
+| dynamo-operator.webhook.namespaceSelector | object | `{}` | Unsupported; must remain empty. Admission and conversion webhooks are always global and owned by the cluster-wide operator. Installation fails if set. |
 | dynamo-operator.webhook.certManager.enabled | bool | `false` | Whether to use cert-manager for automatic certificate management. Requires cert-manager to be installed in the cluster. When enabled, cert-manager will provision and rotate certificates instead of the operator's built-in cert-controller. |
 | dynamo-operator.webhook.certManager.certificate.duration | string | `"8760h"` | Certificate duration for webhook certificates managed by cert-manager (e.g., "8760h" for 1 year). cert-manager will automatically renew the certificate before it expires. |
 | dynamo-operator.webhook.certManager.certificate.renewBefore | string | `"360h"` | Time before certificate expiration to trigger renewal (e.g., "360h" for 15 days). cert-manager will attempt to renew the certificate when this threshold is reached. |

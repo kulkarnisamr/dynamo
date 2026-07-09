@@ -2427,5 +2427,8 @@ func (r *DynamoGraphDeploymentRequestReconciler) SetupWithManager(mgr ctrl.Manag
 		).
 		// Set the event filter to ignore resources handled by other controllers in namespace-restricted mode
 		WithEventFilter(commonController.EphemeralDeploymentEventFilter(r.Config, r.RuntimeConfig)).
-		Complete(observability.NewObservedReconciler(r, consts.ResourceTypeDynamoGraphDeploymentRequest))
+		Complete(commonController.WithNamespaceExclusion(
+			observability.NewObservedReconciler(r, consts.ResourceTypeDynamoGraphDeploymentRequest),
+			r.RuntimeConfig,
+		))
 }

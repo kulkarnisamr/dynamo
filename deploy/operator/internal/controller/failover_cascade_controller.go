@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	commonconsts "github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
@@ -53,14 +54,20 @@ const (
 // considered; see failoverCascadePredicate().
 type FailoverCascadeReconciler struct {
 	client.Client
-	Recorder record.EventRecorder
+	Recorder      record.EventRecorder
+	RuntimeConfig *commonController.RuntimeConfig
 }
 
 // NewFailoverCascadeReconciler creates a new reconciler.
-func NewFailoverCascadeReconciler(c client.Client, recorder record.EventRecorder) *FailoverCascadeReconciler {
+func NewFailoverCascadeReconciler(
+	c client.Client,
+	recorder record.EventRecorder,
+	runtimeConfig *commonController.RuntimeConfig,
+) *FailoverCascadeReconciler {
 	return &FailoverCascadeReconciler{
-		Client:   c,
-		Recorder: recorder,
+		Client:        c,
+		Recorder:      recorder,
+		RuntimeConfig: runtimeConfig,
 	}
 }
 
@@ -157,7 +164,7 @@ func (r *FailoverCascadeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Pod{}, &handler.EnqueueRequestForObject{},
 			builder.WithPredicates(failoverCascadePredicate()),
 		).
-		Complete(r)
+		Complete(commonController.WithNamespaceExclusion(r, r.RuntimeConfig))
 }
 
 func isTerminalPhase(phase corev1.PodPhase) bool {

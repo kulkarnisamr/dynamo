@@ -23,7 +23,6 @@ import (
 
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
-	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 )
 
@@ -60,9 +59,6 @@ func (h *PodCheckpointRestoreMutator) Handle(ctx context.Context, req admission.
 	}
 	if h.config == nil || !h.config.Checkpoint.Enabled {
 		return admission.Allowed("checkpoint disabled")
-	}
-	if excluded := internalwebhook.GetExcludedNamespaces(); excluded != nil && excluded.Contains(req.Namespace) {
-		return admission.Allowed("namespace excluded")
 	}
 	if h.client == nil {
 		logger.Info("checkpoint restore mutator is unavailable because client is nil; allowing pod unchanged")

@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
-// Deprecated: Package namespace_scope implements the lease-based coordination mechanism for the
-// deprecated namespace-restricted operator mode. It will be removed in a future release.
+// Package namespace_scope implements lease-based coordination for the development/test-only
+// namespace-restricted operator mode.
 package namespace_scope
 
 import (
@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"github.com/go-logr/logr"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/client-go/informers"
@@ -35,9 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Deprecated: LeaseWatcher watches for namespace scope marker leases and maintains
-// an exclusion list for the cluster-wide operator. It is part of the deprecated
-// namespace-restricted operator mode.
+// LeaseWatcher watches namespace reconciliation ownership leases. Every active
+// lease excludes cluster-wide reconciliation and may carry admission gate data.
 type LeaseWatcher struct {
 	excludedNamespaces sync.Map // map[string]*coordinationv1.Lease (namespace -> lease object)
 	informerFactory    informers.SharedInformerFactory
@@ -59,13 +59,30 @@ func NewLeaseWatcher(config *rest.Config) (*LeaseWatcher, error) {
 	}, nil
 }
 
-// Contains checks if a namespace is in the exclusion list AND if its lease is still valid.
-// This method implements the ExcludedNamespacesInterface.
-// It automatically removes expired leases, preventing stale leases from blocking reconciliation.
+// Contains reports whether an active lease excludes cluster-wide reconciliation.
 func (lw *LeaseWatcher) Contains(namespace string) bool {
+	_, exists := lw.activeLease(namespace)
+	return exists
+}
+
+// AdmissionGateSnapshot returns the active namespaced operator's serialized
+// admission gates. A legacy Lease without the annotation inherits global gates.
+func (lw *LeaseWatcher) AdmissionGateSnapshot(namespace string) (string, bool) {
+	lease, exists := lw.activeLease(namespace)
+	if !exists {
+		return "", false
+	}
+	if lease.Annotations == nil {
+		return "", false
+	}
+	snapshot, found := lease.Annotations[features.LeaseAnnotation]
+	return snapshot, found
+}
+
+func (lw *LeaseWatcher) activeLease(namespace string) (*coordinationv1.Lease, bool) {
 	value, exists := lw.excludedNamespaces.Load(namespace)
 	if !exists {
-		return false
+		return nil, false
 	}
 
 	lease, ok := value.(*coordinationv1.Lease)
@@ -75,7 +92,7 @@ func (lw *LeaseWatcher) Contains(namespace string) bool {
 			"namespace", namespace,
 			"type", fmt.Sprintf("%T", value))
 		lw.excludedNamespaces.Delete(namespace)
-		return false
+		return nil, false
 	}
 
 	// Check if lease has expired (critical for handling stale leases after crashes)
@@ -85,22 +102,22 @@ func (lw *LeaseWatcher) Contains(namespace string) bool {
 			"renewTime", lease.Spec.RenewTime,
 			"leaseDuration", lease.Spec.LeaseDurationSeconds)
 		lw.removeExcludedNamespace(namespace)
-		return false
+		return nil, false
 	}
 
-	return true
+	return lease, true
 }
 
-// Start starts watching for namespace scope marker leases
+// Start watches namespace reconciliation leases.
 func (lw *LeaseWatcher) Start(ctx context.Context) error {
 	lw.logger = log.FromContext(ctx).WithValues("component", "namespace-scope-lease-watcher")
 
-	lw.logger.Info("Starting namespace scope marker lease watcher")
+	lw.logger.Info("Starting namespace reconciliation lease watcher")
 
 	// Get the lease informer
 	leaseInformer := lw.informerFactory.Coordination().V1().Leases().Informer()
 
-	// Add event handler for namespace scope marker leases
+	// Only well-known reconciliation leases affect controller ownership.
 	_, err := leaseInformer.AddEventHandler(k8sCache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if lease := lw.extractLease(obj); lease != nil {
@@ -132,7 +149,7 @@ func (lw *LeaseWatcher) Start(ctx context.Context) error {
 		return err
 	}
 
-	lw.logger.Info("Namespace scope marker lease watcher started and cache synced")
+	lw.logger.Info("Namespace reconciliation lease watcher started and cache synced")
 	return nil
 }
 
@@ -157,7 +174,7 @@ func (lw *LeaseWatcher) extractLease(obj any) *coordinationv1.Lease {
 
 // handleLeaseAdd handles lease creation events
 func (lw *LeaseWatcher) handleLeaseAdd(lease *coordinationv1.Lease) {
-	// Only process namespace scope marker leases
+	// Only process namespace reconciliation leases.
 	if !lw.isNamespaceScopeMarker(lease) {
 		return
 	}
@@ -174,7 +191,7 @@ func (lw *LeaseWatcher) handleLeaseAdd(lease *coordinationv1.Lease) {
 
 // handleLeaseUpdate handles lease update events (renewals)
 func (lw *LeaseWatcher) handleLeaseUpdate(lease *coordinationv1.Lease) {
-	// Only process namespace scope marker leases
+	// Only process namespace reconciliation leases.
 	if !lw.isNamespaceScopeMarker(lease) {
 		return
 	}
@@ -197,7 +214,7 @@ func (lw *LeaseWatcher) handleLeaseUpdate(lease *coordinationv1.Lease) {
 
 // handleLeaseDelete handles lease deletion/expiration events
 func (lw *LeaseWatcher) handleLeaseDelete(lease *coordinationv1.Lease) {
-	// Only process namespace scope marker leases
+	// Only process namespace reconciliation leases.
 	if !lw.isNamespaceScopeMarker(lease) {
 		return
 	}
@@ -211,7 +228,6 @@ func (lw *LeaseWatcher) addExcludedNamespace(lease *coordinationv1.Lease) {
 	if lease.Spec.HolderIdentity != nil {
 		holderIdentity = *lease.Spec.HolderIdentity
 	}
-
 	// Store the full lease object so Contains() can check TTL on every access
 	lw.excludedNamespaces.Store(lease.Namespace, lease)
 	lw.logger.Info("Excluding namespace from cluster-wide operator processing",
@@ -227,9 +243,9 @@ func (lw *LeaseWatcher) removeExcludedNamespace(namespace string) {
 		"reason", "namespace-restricted operator lease expired or deleted")
 }
 
-// isNamespaceScopeMarker checks if a lease is a namespace scope marker
+// isNamespaceScopeMarker checks if a lease is the namespace reconciliation lease.
 func (lw *LeaseWatcher) isNamespaceScopeMarker(lease *coordinationv1.Lease) bool {
-	// A lease is a namespace scope marker if it has the well-known name
+	// The well-known name preserves compatibility with existing installations.
 	// Labels are added for observability/filtering but not required for identification
 	return lease.Name == LeaseName
 }

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"github.com/go-logr/logr"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +37,7 @@ func TestLeaseWatcher_HandleLeaseAdd(t *testing.T) {
 		excludedNamespace string
 	}{
 		{
-			name: "adds namespace for valid marker lease",
+			name: "adds namespace for valid reconciliation lease",
 			lease: &coordinationv1.Lease{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      LeaseName,
@@ -134,6 +135,37 @@ func TestLeaseWatcher_HandleLeaseUpdate(t *testing.T) {
 	// Verify namespace is still excluded
 	if !lw.Contains("test-ns") {
 		t.Error("namespace should still be excluded after second update")
+	}
+}
+
+func TestLeaseWatcher_AdmissionGateSnapshot(t *testing.T) {
+	lease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      LeaseName,
+			Namespace: "test-ns",
+			Annotations: map[string]string{
+				features.LeaseAnnotation: `{"grove":true}`,
+			},
+		},
+		Spec: coordinationv1.LeaseSpec{
+			LeaseDurationSeconds: ptr.To[int32](30),
+			RenewTime:            &metav1.MicroTime{Time: time.Now()},
+		},
+	}
+	lw := &LeaseWatcher{logger: logr.Discard()}
+	lw.handleLeaseAdd(lease)
+	if got, found := lw.AdmissionGateSnapshot("test-ns"); !found || got != `{"grove":true}` {
+		t.Fatalf("AdmissionGateSnapshot() = %q, %v", got, found)
+	}
+
+	lease = lease.DeepCopy()
+	lease.Annotations[features.LeaseAnnotation] = `{"grove":false}`
+	lw.handleLeaseUpdate(lease)
+	if got, found := lw.AdmissionGateSnapshot("test-ns"); !found || got != `{"grove":false}` {
+		t.Fatalf("updated AdmissionGateSnapshot() = %q, %v", got, found)
+	}
+	if _, found := lw.AdmissionGateSnapshot("unclaimed"); found {
+		t.Fatal("unclaimed namespace must not return a snapshot")
 	}
 }
 

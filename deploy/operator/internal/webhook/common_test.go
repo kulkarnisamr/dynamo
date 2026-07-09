@@ -7,57 +7,109 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-type testExcludedNamespaces map[string]bool
+var errValidationCalled = errors.New("validation called")
+var errFeatureGatesMissing = errors.New("feature gates missing from admission context")
 
-func (e testExcludedNamespaces) Contains(namespace string) bool {
-	return e[namespace]
+type staticGateResolver map[string]features.Gates
+
+func (s staticGateResolver) ForNamespace(namespace string) (features.Gates, []string) {
+	warnings := []string(nil)
+	if namespace == "claimed" {
+		warnings = []string{"unknown feature gate"}
+	}
+	return s[namespace], warnings
 }
 
-type countingDefaulter struct {
-	calls int
+type rejectingValidator struct{}
+
+func (rejectingValidator) ValidateCreate(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return nil, validationCalled(ctx)
 }
 
-func (d *countingDefaulter) Default(context.Context, runtime.Object) error {
-	d.calls++
-	return nil
+func (rejectingValidator) ValidateUpdate(ctx context.Context, _, _ runtime.Object) (admission.Warnings, error) {
+	return nil, validationCalled(ctx)
 }
 
-func TestLeaseAwareDefaulter(t *testing.T) {
-	defaulter := &countingDefaulter{}
-	wrapped := NewLeaseAwareDefaulter(defaulter, testExcludedNamespaces{"claimed": true})
-
-	if err := wrapped.Default(context.Background(), &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "claimed"},
-	}); err != nil {
-		t.Fatalf("defaulting excluded namespace: %v", err)
-	}
-	if defaulter.calls != 0 {
-		t.Fatalf("excluded namespace called defaulter %d times, want 0", defaulter.calls)
-	}
-
-	if err := wrapped.Default(context.Background(), &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "unclaimed"},
-	}); err != nil {
-		t.Fatalf("defaulting unclaimed namespace: %v", err)
-	}
-	if defaulter.calls != 1 {
-		t.Fatalf("unclaimed namespace called defaulter %d times, want 1", defaulter.calls)
-	}
+func (rejectingValidator) ValidateDelete(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return nil, validationCalled(ctx)
 }
 
-func TestLeaseAwareDefaulterWithoutChecker(t *testing.T) {
-	defaulter := &countingDefaulter{}
-	wrapped := NewLeaseAwareDefaulter(defaulter, nil)
-	if wrapped != defaulter {
-		t.Fatal("defaulter without a checker should be returned unchanged")
+func validationCalled(ctx context.Context) error {
+	if _, ok := features.FromContext(ctx); !ok {
+		return errFeatureGatesMissing
+	}
+	return errValidationCalled
+}
+
+func TestFeatureAwareValidator(t *testing.T) {
+	validator := NewFeatureAwareValidator(rejectingValidator{}, staticGateResolver{
+		"claimed": {Grove: true},
+	})
+	claimed := &corev1.ConfigMap{}
+	claimed.Namespace = "claimed"
+	unclaimed := &corev1.ConfigMap{}
+	unclaimed.Namespace = "unclaimed"
+
+	tests := []struct {
+		name         string
+		call         func() (admission.Warnings, error)
+		wantWarnings int
+	}{
+		{
+			name: "validates create with namespaced gates",
+			call: func() (admission.Warnings, error) {
+				return validator.ValidateCreate(context.Background(), claimed)
+			},
+			wantWarnings: 1,
+		},
+		{
+			name: "validates update with namespaced gates",
+			call: func() (admission.Warnings, error) {
+				return validator.ValidateUpdate(context.Background(), unclaimed, claimed)
+			},
+			wantWarnings: 1,
+		},
+		{
+			name: "validates delete with namespaced gates",
+			call: func() (admission.Warnings, error) {
+				return validator.ValidateDelete(context.Background(), claimed)
+			},
+			wantWarnings: 1,
+		},
+		{
+			name: "validates namespace with global gates",
+			call: func() (admission.Warnings, error) {
+				return validator.ValidateCreate(context.Background(), unclaimed)
+			},
+		},
+		{
+			name: "validates object without metadata",
+			call: func() (admission.Warnings, error) {
+				return validator.ValidateCreate(context.Background(), &runtime.Unknown{})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			warnings, err := test.call()
+			if !errors.Is(err, errValidationCalled) {
+				t.Errorf("validation error = %v, want %v", err, errValidationCalled)
+			}
+			if len(warnings) != test.wantWarnings {
+				t.Errorf("warnings = %v, want %d", warnings, test.wantWarnings)
+			}
+		})
 	}
 }
 

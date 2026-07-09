@@ -120,13 +120,11 @@ func (h *DynamoModelHandler) ValidateDelete(ctx context.Context, obj runtime.Obj
 }
 
 // RegisterWithManager registers the webhook with the manager.
-// The handler is automatically wrapped with LeaseAwareValidator to add namespace exclusion logic.
 func (h *DynamoModelHandler) RegisterWithManager(mgr manager.Manager) error {
-	// Wrap the handler with lease-aware logic for cluster-wide coordination
-	leaseAwareValidator := internalwebhook.NewLeaseAwareValidator(h, internalwebhook.GetExcludedNamespaces())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.ValidationResolver())
 
 	// Wrap with metrics collection
-	observedValidator := observability.NewObservedValidator(leaseAwareValidator, consts.ResourceTypeDynamoModel)
+	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoModel)
 
 	webhook := admission.
 		WithCustomValidator(mgr.GetScheme(), &nvidiacomv1alpha1.DynamoModel{}, observedValidator).

@@ -16,9 +16,9 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Whether the cluster-wide operator applies CRDs via an init container.
-# This must be false for namespace-restricted installations, which must also
-# be installed with Helm's --skip-crds flag.
+# -- Whether the cluster-wide operator applies bundled CRDs via its crd-apply
+# init container. This must be false for namespace-restricted installations.
+# Namespaced installations must additionally use Helm's --skip-crds flag.
 upgradeCRD: true
 
 featureGates:
@@ -30,17 +30,17 @@ featureGates:
 # Prefer featureGates.gmsSnapshot for the temporary GMS + Snapshot gate.
 env: []
 
-# -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode for production deployments.
+# -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode (the default) for production deployments.
 namespaceRestriction:
-  # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation and admission. Not supported for production.
+  # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production.
   enabled: false
-  # -- DEVELOPMENT AND TESTING ONLY: Target namespace. Defaults to the Helm release namespace.
+  # -- DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace.
   targetNamespace: ""
-  # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease settings.
+  # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode.
   lease:
-    # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease duration.
+    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease duration.
     duration: 30s
-    # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease renewal interval.
+    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease renewal interval.
     renewInterval: 10s
 # -- DEVELOPMENT AND TESTING ONLY: GPU discovery settings for namespace-restricted operators.
 gpuDiscovery:
@@ -218,8 +218,8 @@ webhook:
   # Timeout for webhook calls (in seconds)
   timeoutSeconds: 10
 
-  # -- Unsupported; must remain empty. Helm configures global admission for the
-  # cluster-wide operator and target-namespace admission for restricted operators.
+  # -- Unsupported; must remain empty. Admission and conversion webhooks are always
+  # global and owned by the cluster-wide operator. Installation fails if set.
   namespaceSelector: {}
 
   # cert-manager integration (optional, alternative to built-in cert-controller)

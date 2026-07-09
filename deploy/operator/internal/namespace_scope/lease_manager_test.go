@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +39,20 @@ const (
 )
 
 func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
+	existingLease := func() *coordinationv1.Lease {
+		return &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      LeaseName,
+				Namespace: testNamespace,
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity:       ptr.To("old-holder"),
+				LeaseDurationSeconds: ptr.To[int32](60),
+				AcquireTime:          &metav1.MicroTime{Time: time.Now().Add(-2 * time.Minute)},
+				RenewTime:            &metav1.MicroTime{Time: time.Now().Add(-1 * time.Minute)},
+			},
+		}
+	}
 	tests := []struct {
 		name            string
 		namespace       string
@@ -45,32 +60,21 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 		existingLease   *coordinationv1.Lease
 	}{
 		{
-			name:            "creates lease when it doesn't exist",
+			name:            "creates lease with admission gates",
 			namespace:       testNamespace,
 			operatorVersion: testOperatorVersion,
-			existingLease:   nil,
 		},
 		{
-			name:            "updates existing lease",
+			name:            "updates legacy lease with admission gates",
 			namespace:       testNamespace,
 			operatorVersion: testOperatorVersion,
-			existingLease: &coordinationv1.Lease{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      LeaseName,
-					Namespace: testNamespace,
-				},
-				Spec: coordinationv1.LeaseSpec{
-					HolderIdentity:       ptr.To("old-holder"),
-					LeaseDurationSeconds: ptr.To[int32](60),
-					AcquireTime:          &metav1.MicroTime{Time: time.Now().Add(-2 * time.Minute)},
-					RenewTime:            &metav1.MicroTime{Time: time.Now().Add(-1 * time.Minute)},
-				},
-			},
+			existingLease:   existingLease(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			const admissionGatesJSON = `{"gmsSnapshot":true,"checkpoint":false}`
 			// Create fake client with or without existing lease
 			var client *fake.Clientset
 			if tt.existingLease != nil {
@@ -81,13 +85,13 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 
 			// Create lease manager
 			lm := &LeaseManager{
-				client:          client,
-				namespace:       tt.namespace,
-				leaseDuration:   30 * time.Second,
-				renewInterval:   10 * time.Second,
-				holderIdentity:  "namespace-restricted-operator-" + tt.operatorVersion,
-				operatorVersion: tt.operatorVersion,
-				stopCh:          make(chan struct{}),
+				client:             client,
+				namespace:          tt.namespace,
+				leaseDuration:      30 * time.Second,
+				renewInterval:      10 * time.Second,
+				holderIdentity:     "namespace-restricted-operator-" + tt.operatorVersion,
+				admissionGatesJSON: admissionGatesJSON,
+				stopCh:             make(chan struct{}),
 			}
 
 			// Call createOrUpdateLease
@@ -129,25 +133,28 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 			if *lease.Spec.LeaseDurationSeconds != 30 {
 				t.Errorf("lease duration = %v, want %v", *lease.Spec.LeaseDurationSeconds, 30)
 			}
-
-			if lease.Spec.RenewTime == nil {
-				t.Fatal("lease renew time should be set")
+			if got := lease.Annotations[features.LeaseAnnotation]; got != admissionGatesJSON {
+				t.Errorf("admission gates = %q, want %q", got, admissionGatesJSON)
 			}
-			if tt.existingLease != nil {
-				if !lease.Spec.RenewTime.After(tt.existingLease.Spec.RenewTime.Time) {
-					t.Error("renew time was not updated")
-				}
+
+			// Every active lease needs a RenewTime so the cluster-wide watcher
+			// excludes the namespace immediately after initial creation.
+			if lease.Spec.RenewTime == nil {
+				t.Error("lease renew time should be set")
+			} else if tt.existingLease != nil && !lease.Spec.RenewTime.After(tt.existingLease.Spec.RenewTime.Time) {
+				t.Error("renew time was not updated")
+			}
+
+			// Updates preserve the original acquisition time.
+			if tt.existingLease != nil && tt.existingLease.Spec.AcquireTime != nil {
 				if lease.Spec.AcquireTime == nil {
 					t.Error("acquire time should be preserved on update")
 				} else if !lease.Spec.AcquireTime.Equal(tt.existingLease.Spec.AcquireTime) {
 					t.Error("acquire time should not change on update")
 				}
-			} else {
-				if lease.Spec.AcquireTime == nil {
-					t.Error("lease acquire time should be set on initial creation")
-				} else if !lease.Spec.RenewTime.Equal(lease.Spec.AcquireTime) {
-					t.Error("initial renew time should match acquire time")
-				}
+			}
+			if lease.Spec.AcquireTime == nil {
+				t.Error("lease acquire time should be set")
 			}
 		})
 	}
@@ -172,13 +179,12 @@ func TestLeaseManager_Stop(t *testing.T) {
 
 	// Create lease manager
 	lm := &LeaseManager{
-		client:          client,
-		namespace:       namespace,
-		leaseDuration:   30 * time.Second,
-		renewInterval:   10 * time.Second,
-		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
-		operatorVersion: operatorVersion,
-		stopCh:          make(chan struct{}),
+		client:         client,
+		namespace:      namespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  10 * time.Second,
+		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
+		stopCh:         make(chan struct{}),
 	}
 
 	// Stop lease manager
@@ -204,13 +210,12 @@ func TestLeaseManager_Stop_LeaseAlreadyDeleted(t *testing.T) {
 
 	// Create lease manager
 	lm := &LeaseManager{
-		client:          client,
-		namespace:       namespace,
-		leaseDuration:   30 * time.Second,
-		renewInterval:   10 * time.Second,
-		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
-		operatorVersion: operatorVersion,
-		stopCh:          make(chan struct{}),
+		client:         client,
+		namespace:      namespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  10 * time.Second,
+		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
+		stopCh:         make(chan struct{}),
 	}
 
 	// Stop lease manager - should succeed even though lease doesn't exist
@@ -230,13 +235,12 @@ func TestLeaseManager_StartAndStop_CompleteLifecycle(t *testing.T) {
 
 	// Create lease manager with short intervals for testing
 	lm := &LeaseManager{
-		client:          client,
-		namespace:       namespace,
-		leaseDuration:   30 * time.Second,
-		renewInterval:   50 * time.Millisecond,
-		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
-		operatorVersion: operatorVersion,
-		stopCh:          make(chan struct{}),
+		client:         client,
+		namespace:      namespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  50 * time.Millisecond,
+		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
+		stopCh:         make(chan struct{}),
 	}
 
 	// Start the lease manager
@@ -255,6 +259,8 @@ func TestLeaseManager_StartAndStop_CompleteLifecycle(t *testing.T) {
 		t.Errorf("lease name = %v, want %v", lease.Name, LeaseName)
 	}
 
+	// The watcher requires RenewTime immediately so it excludes the namespace
+	// before the first periodic renewal.
 	if lease.Spec.RenewTime == nil {
 		t.Fatal("initial lease should have renew time set on creation")
 	}
@@ -321,15 +327,14 @@ func TestLeaseManager_FailureTracking_SendsErrorOnMaxFailures(t *testing.T) {
 
 	// Create lease manager with short intervals for faster test execution
 	lm := &LeaseManager{
-		client:          client,
-		namespace:       namespace,
-		leaseDuration:   30 * time.Second,
-		renewInterval:   10 * time.Millisecond, // Fast for testing
-		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
-		operatorVersion: operatorVersion,
-		stopCh:          make(chan struct{}),
-		maxFailures:     3,
-		errCh:           make(chan error, 1),
+		client:         client,
+		namespace:      namespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  10 * time.Millisecond, // Fast for testing
+		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
+		stopCh:         make(chan struct{}),
+		maxFailures:    3,
+		errCh:          make(chan error, 1),
 	}
 
 	// Start renewal loop - all updates will fail
@@ -385,16 +390,15 @@ func TestLeaseManager_FailureTracking_ResetsOnSuccess(t *testing.T) {
 
 	// Create lease manager with pre-existing failures
 	lm := &LeaseManager{
-		client:          client,
-		namespace:       namespace,
-		leaseDuration:   30 * time.Second,
-		renewInterval:   20 * time.Millisecond, // Reasonable interval for test
-		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
-		operatorVersion: operatorVersion,
-		stopCh:          make(chan struct{}),
-		maxFailures:     3,
-		errCh:           make(chan error, 1),
-		failureCount:    2, // Simulates 2 previous failures
+		client:         client,
+		namespace:      namespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  20 * time.Millisecond, // Reasonable interval for test
+		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
+		stopCh:         make(chan struct{}),
+		maxFailures:    3,
+		errCh:          make(chan error, 1),
+		failureCount:   2, // Simulates 2 previous failures
 	}
 
 	// Start renewal loop (will succeed and reset counter)

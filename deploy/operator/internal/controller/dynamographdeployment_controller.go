@@ -2844,7 +2844,7 @@ func (r *DynamoGraphDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) err
 	}
 	// Wrap with metrics collection
 	observedReconciler := observability.NewObservedReconciler(r, consts.ResourceTypeDynamoGraphDeployment)
-	return ctrlBuilder.Complete(observedReconciler)
+	return ctrlBuilder.Complete(commoncontroller.WithNamespaceExclusion(observedReconciler, r.RuntimeConfig))
 }
 
 func (r *DynamoGraphDeploymentReconciler) GetRecorder() record.EventRecorder {

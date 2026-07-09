@@ -363,14 +363,15 @@ See [AI Configurator documentation](https://github.com/ai-dynamo/aiconfigurator#
 The operator automatically discovers GPU resources from cluster nodes, providing hardware info (GPU model, VRAM, GPUs per node) and automatic profiling search space calculation.
 
 **Requirements:**
+
 - **Cluster-scoped operators** (recommended): Have node read permissions by default. GPU discovery works automatically.
 
 > [!WARNING]
-> Namespace-restricted operators are only for development and testing. They are not supported for production.
+> The following applies only to namespace-scoped operators, which are supported for development and testing only, not production.
 
-- **Namespace-restricted operators**: GPU discovery is enabled by default when installing with Helm. The chart provisions the required ClusterRole and ClusterRoleBinding.
+- **Namespace-scoped operators** (development/test only): GPU discovery is enabled by default when installing via Helm — the chart provisions the required ClusterRole/ClusterRoleBinding automatically
 
-For namespace-restricted operators, control GPU discovery with a Helm value:
+**For namespace-scoped operators**, GPU discovery is controlled by a Helm value:
 
 ```bash
 # GPU discovery enabled (default) — Helm provisions read-only node access automatically

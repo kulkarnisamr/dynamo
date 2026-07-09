@@ -594,7 +594,7 @@ func (r *CheckpointReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		WithEventFilter(commonController.EphemeralDeploymentEventFilter(r.Config, r.RuntimeConfig)).
-		Complete(r)
+		Complete(commonController.WithNamespaceExclusion(r, r.RuntimeConfig))
 }
 
 // isCheckpointSourcePod reports whether an object is a checkpoint-source pod (carries

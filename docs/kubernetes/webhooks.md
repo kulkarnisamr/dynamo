@@ -127,7 +127,7 @@ dynamo-operator:
     failurePolicy: Fail        # Fail (reject on error) or Ignore (allow on error)
     timeoutSeconds: 10         # Webhook timeout
 
-    # User-configured namespace filtering is unsupported
+    # Namespace filtering is unsupported and must remain empty
     namespaceSelector: {}
 ```
 
@@ -148,9 +148,11 @@ webhook:
 #### Namespace Filtering
 
 User-configured webhook namespace filtering is not supported. Helm rejects a non-empty
-`webhook.namespaceSelector` value. The cluster-wide webhook configurations cover every namespace,
-while namespace-restricted webhook configurations use a Helm-generated selector for their target
-namespace. The cluster-wide handlers skip namespaces claimed by an active ownership Lease.
+`webhook.namespaceSelector` because global defaulting, mutation, validation, and conversion
+must not be scoped by user policy.
+
+Namespace-restricted operators do not create webhook configurations. The global validating
+webhook reads their effective feature gates from the namespace reconciliation Lease.
 
 ---
 
@@ -323,76 +325,91 @@ helm install dynamo-platform . -n <namespace> -f values.yaml
 ## Development and Test Multi-Operator Deployments
 
 > [!WARNING]
-> Namespace-restricted and multi-operator configurations are only for development and testing.
-> They are not supported for production. Use one cluster-wide operator in production.
+> Namespace-restricted and multi-operator configurations are only for development and testing. They are not supported for production. Use a single cluster-wide operator in production.
 
-The operator can run one cluster-wide instance and namespace-restricted instances using a
-Lease-based ownership mechanism.
+The operator supports running both **cluster-wide** and **namespace-restricted** instances simultaneously using a **lease-based coordination mechanism**.
 
 ### Scenario
 
 ```text
 Cluster:
 ├─ Operator A (cluster-wide, namespace: platform-system)
-│  └─ Skips reconciliation and admission in team-a
+│  └─ Owns CRDs and global conversion, defaulting, mutation, and validation
 └─ Operator B (namespace-restricted, namespace: team-a)
-   └─ Reconciles, validates, and mutates only team-a
+   └─ Reconciles team-a; publishes its effective feature gates in a Lease
 ```
 
 ### How It Works
 
-1. The namespace-restricted operator creates a Lease named `dynamo-operator-namespace-scope`.
-2. The cluster-wide operator skips reconciliation, validation, and mutation for that namespace.
-3. The namespace-restricted operator's webhook configurations select only its target namespace.
-4. Each operator manages the certificate and CA bundles for its own admission configurations.
-5. Only the cluster-wide operator updates CRDs, conversion service references, and conversion CA bundles.
+1. **Namespace-restricted operator** creates a Lease in its namespace
+2. **Cluster-wide operator** watches for Leases named `dynamo-operator-namespace-scope`
+3. **Cluster-wide operator** skips reconciliation for namespaces with active Leases
+4. **Namespace-restricted operator** reconciles its namespace
+5. **Cluster-wide validation** applies the effective feature gates published in the Lease
+
+CRD schema and CEL validation always apply. Conversion, defaulting, mutation, and validation
+are always served by the cluster-wide operator.
+
+### Lease Configuration
+
+The lease mechanism is **automatically configured** based on deployment mode:
+
+The Lease annotation `nvidia.com/dynamo-operator-admission-feature-gates` contains the
+namespaced operator's complete effective gate snapshot. The cluster-wide validating webhook
+configuration advertises
+`nvidia.com/dynamo-operator-lease-admission-feature-gates=v1`. A namespaced operator refuses
+to start if this cluster-scoped capability is missing. Known Lease values override global
+values in either direction. Unknown values produce an admission warning and are ignored.
+
+```yaml
+# Cluster-wide operator (default)
+namespaceRestriction:
+  enabled: false
+# → Watches for leases in all namespaces
+# → Skips reconciliation for namespaces with active leases
+# → Applies namespace feature gates during global validation
+
+# Namespace-restricted operator
+namespaceRestriction:
+  enabled: true
+  targetNamespace: team-a
+# → Creates lease in team-a namespace
+# → Reconciles team-a and publishes its effective feature gates
+```
 
 ### Deployment Example
 
 ```bash
-# 1. Deploy the cluster-wide operator
-helm install platform-operator dynamo-platform -n platform-system
+# 1. Deploy cluster-wide operator
+helm install platform-operator dynamo-platform \
+  -n platform-system \
+  --set dynamo-operator.namespaceRestriction.enabled=false
 
-# 2. Deploy a namespace-restricted operator for team-a
+# 2. Deploy namespace-restricted operator for team-a
 helm install team-a-operator dynamo-platform \
   -n team-a \
   --skip-crds \
   --set dynamo-operator.namespaceRestriction.enabled=true \
+  --set dynamo-operator.namespaceRestriction.targetNamespace=team-a \
   --set dynamo-operator.upgradeCRD=false
 ```
 
-### ValidatingWebhookConfiguration Naming
+Always pass `--skip-crds` for a namespace-restricted release. Helm installs the `crds/`
+directory before templates can enforce `upgradeCRD=false` and cannot detect a missing
+`--skip-crds` flag.
 
-The webhook configuration name reflects the deployment mode:
-
-- **Cluster-wide**: `<release>-validating`
-- **Namespace-restricted**: `<release>-validating-<namespace>`
-
-Example:
-
-```bash
-# Cluster-wide
-platform-operator-validating
-
-# Namespace-restricted (team-a)
-team-a-operator-validating-team-a
-```
-
-Helm fixes every webhook in the namespace-restricted configurations to the target namespace. Do not
-set `webhook.namespaceSelector` manually.
+Run the same operator version in parallel whenever possible. Mixing versions is strongly
+discouraged. Otherwise, the cluster-wide operator should be newer and ship the newest APIs.
+For controller development, a newer namespaced operator may run if it remains compatible
+with the cluster-wide CRDs and global webhooks.
 
 ### Lease Health
 
-After you uninstall the namespace-restricted release, its webhook configurations are removed and
-its Lease expires. Cluster-wide reconciliation and admission then resume for the namespace. If only
-the operator Pod is unhealthy, its webhook configurations remain and can block admission according
-to `failurePolicy` until the release recovers or is uninstalled.
+If the namespace-restricted operator is deleted or becomes unhealthy:
 
-Run the same operator version in parallel whenever possible. The cluster-wide operator should be
-the same version or newer and must provide the newest APIs. A newer namespaced controller is
-acceptable for development when it remains compatible with the installed CRDs.
-Install every operator Helm release in a separate namespace so each release owns a distinct
-admission certificate and webhook configuration set.
+- The release deletes its Lease during graceful shutdown
+- An abandoned Lease expires after `leaseDuration` (30 seconds by default)
+- The cluster-wide operator resumes reconciliation and Go validation for that namespace
 
 ---
 
@@ -417,7 +434,7 @@ kubectl get validatingwebhookconfiguration <name> -o yaml
 # Verify:
 # - caBundle is present and non-empty
 # - clientConfig.service points to correct service
-# - webhooks[].namespaceSelector is absent for cluster-wide admission or matches the target namespace
+# - webhooks[].namespaceSelector is absent
 ```
 
 3. **Verify webhook service exists**:
@@ -619,7 +636,7 @@ helm upgrade <release> dynamo-platform -n <namespace>
 ### Multi-Tenant Deployments
 
 1. ✅ **Deploy one cluster-wide operator** for platform-wide validation
-2. Use namespace-restricted operators only for development or testing, never as a production tenant-isolation mechanism
+2. ✅ **Use namespace-restricted operators only for development or testing**, never as a production tenant-isolation mechanism
 
 ---
 

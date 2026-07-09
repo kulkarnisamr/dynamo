@@ -152,19 +152,19 @@ type LeaderElectionConfiguration struct {
 
 // NamespaceConfiguration determines operator namespace mode.
 type NamespaceConfiguration struct {
-	// Restricted enables namespace-restricted mode for development and testing.
-	// Namespace-restricted mode is not supported for production.
+	// DEVELOPMENT AND TESTING ONLY: Restricted enables namespace-restricted reconciliation.
+	// This mode is not supported for production.
 	Restricted string `json:"restricted"`
-	// Scope configures the namespace ownership claim in namespace-restricted mode.
+	// DEVELOPMENT AND TESTING ONLY: Scope configures the reconciliation ownership claim used in namespace-restricted mode.
 	Scope NamespaceScopeConfiguration `json:"scope"`
 }
 
-// NamespaceScopeConfiguration configures the development/test namespace ownership claim.
+// NamespaceScopeConfiguration configures development/test-only namespace ownership. It is not supported for production.
 type NamespaceScopeConfiguration struct {
-	// LeaseDuration is the duration of namespace scope marker lease before expiration
+	// DEVELOPMENT AND TESTING ONLY: LeaseDuration is the duration of the reconciliation ownership lease before expiration.
 	// +kubebuilder:default="30s"
 	LeaseDuration metav1.Duration `json:"leaseDuration"`
-	// LeaseRenewInterval is the interval for renewing namespace scope marker lease
+	// DEVELOPMENT AND TESTING ONLY: LeaseRenewInterval is the interval for renewing the reconciliation ownership lease.
 	// +kubebuilder:default="10s"
 	LeaseRenewInterval metav1.Duration `json:"leaseRenewInterval"`
 }

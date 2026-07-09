@@ -26,10 +26,25 @@ import (
 )
 
 func ValidateGMSSnapshotGate(fieldPath string, checkpointEnabled bool, gms *nvidiacomv1alpha1.GPUMemoryServiceSpec) error {
+	return ValidateGMSSnapshotGateEnabled(
+		fieldPath,
+		checkpointEnabled,
+		gms,
+		os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1",
+	)
+}
+
+// ValidateGMSSnapshotGateEnabled validates the gate using an explicit effective value.
+func ValidateGMSSnapshotGateEnabled(
+	fieldPath string,
+	checkpointEnabled bool,
+	gms *nvidiacomv1alpha1.GPUMemoryServiceSpec,
+	enabled bool,
+) error {
 	if !checkpointEnabled || gms == nil || !gms.Enabled {
 		return nil
 	}
-	if os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1" {
+	if enabled {
 		return nil
 	}
 	return fmt.Errorf(

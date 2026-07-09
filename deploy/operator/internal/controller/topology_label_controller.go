@@ -107,7 +107,7 @@ func (r *TopologyLabelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			commonController.EphemeralDeploymentEventFilter(r.Config, r.RuntimeConfig),
 			topologyLabelPredicate(),
 		)).
-		Complete(r)
+		Complete(commonController.WithNamespaceExclusion(r, r.RuntimeConfig))
 }
 
 // topologyLabelPredicate filters to annotated, scheduled pods that still need

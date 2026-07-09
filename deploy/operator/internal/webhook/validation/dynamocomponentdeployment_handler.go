@@ -146,8 +146,7 @@ func (h *DynamoComponentDeploymentHandler) validateDelete(
 }
 
 // RegisterWithManager registers the webhook with the manager.
-// The handler is automatically wrapped with LeaseAwareValidator to add namespace exclusion logic
-// and ObservedValidator to add metrics collection.
+// The handler is wrapped with namespace feature resolution and metrics collection.
 func (h *DynamoComponentDeploymentHandler) RegisterWithManager(mgr manager.Manager) error {
 	h.registerWithManager(
 		mgr,
@@ -174,8 +173,8 @@ func (h *DynamoComponentDeploymentHandler) registerWithManager(
 	path string,
 	validator admission.CustomValidator,
 ) {
-	leaseAwareValidator := internalwebhook.NewLeaseAwareValidator(validator, internalwebhook.GetExcludedNamespaces())
-	observedValidator := observability.NewObservedValidator(leaseAwareValidator, consts.ResourceTypeDynamoComponentDeployment)
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.ValidationResolver())
+	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoComponentDeployment)
 
 	webhook := admission.
 		WithCustomValidator(mgr.GetScheme(), object, observedValidator).

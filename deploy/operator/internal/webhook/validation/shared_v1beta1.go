@@ -26,6 +26,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dra"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -220,8 +221,12 @@ func (v *sharedValidation) validateExperimentalSpec(
 		)...)
 	}
 
+	gmsSnapshotEnabled := os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1"
+	if gates, ok := features.FromContext(v.ctx); ok {
+		gmsSnapshotEnabled = gates.GMSSnapshot
+	}
 	if experimental.Checkpoint != nil && experimental.Checkpoint.Enabled &&
-		experimental.GPUMemoryService != nil && os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) != "1" {
+		experimental.GPUMemoryService != nil && !gmsSnapshotEnabled {
 		allErrs = append(allErrs, field.Forbidden(
 			fldPath.Child("checkpoint"),
 			"GMS + Snapshot is temporarily disabled; disable gpuMemoryService or enable the internal GMS + Snapshot gate",

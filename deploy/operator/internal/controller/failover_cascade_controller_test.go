@@ -66,7 +66,7 @@ func newCascadeReconciler(objs ...client.Object) (*FailoverCascadeReconciler, cl
 	}
 	c := cb.Build()
 
-	return NewFailoverCascadeReconciler(c, record.NewFakeRecorder(16)), c
+	return NewFailoverCascadeReconciler(c, record.NewFakeRecorder(16), nil), c
 }
 
 func TestFailoverCascade_FailedPodDeletesEntireGroup(t *testing.T) {

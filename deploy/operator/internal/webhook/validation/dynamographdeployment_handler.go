@@ -24,6 +24,7 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/observability"
 	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -94,7 +95,7 @@ func (h *DynamoGraphDeploymentHandler) validateCreate(
 	logger.Info("validate create", "name", deployment.Name, "namespace", deployment.Namespace)
 
 	// Create validator with manager for API group detection and perform validation
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled)
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.effectiveGroveGate(ctx))
 	return validator.Validate(ctx, deployment)
 }
 
@@ -133,7 +134,7 @@ func (h *DynamoGraphDeploymentHandler) validateUpdate(
 	}
 
 	// Create validator with manager for API group detection and perform validation.
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled)
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.effectiveGroveGate(ctx))
 	warnings, err := validator.Validate(ctx, newDeployment)
 	if err != nil {
 		return warnings, err
@@ -170,6 +171,13 @@ func (h *DynamoGraphDeploymentHandler) ValidateDelete(ctx context.Context, obj r
 	return h.validateDelete(ctx, obj, nvidiacomv1beta1.DynamoGraphDeploymentGVK)
 }
 
+func (h *DynamoGraphDeploymentHandler) effectiveGroveGate(ctx context.Context) bool {
+	if gates, ok := features.FromContext(ctx); ok {
+		return gates.Grove
+	}
+	return h.groveEnabled
+}
+
 func (h *DynamoGraphDeploymentHandler) validateDelete(
 	ctx context.Context,
 	obj runtime.Object,
@@ -193,8 +201,7 @@ func (h *DynamoGraphDeploymentHandler) validateDelete(
 }
 
 // RegisterWithManager registers the webhook with the manager.
-// The handler is automatically wrapped with LeaseAwareValidator to add namespace exclusion logic
-// and ObservedValidator to add metrics collection.
+// The handler is wrapped with namespace feature resolution and metrics collection.
 func (h *DynamoGraphDeploymentHandler) RegisterWithManager(mgr manager.Manager) error {
 	h.registerWithManager(
 		mgr,
@@ -221,11 +228,10 @@ func (h *DynamoGraphDeploymentHandler) registerWithManager(
 	path string,
 	validator admission.CustomValidator,
 ) {
-	// Wrap the handler with lease-aware logic for cluster-wide coordination
-	leaseAwareValidator := internalwebhook.NewLeaseAwareValidator(validator, internalwebhook.GetExcludedNamespaces())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.ValidationResolver())
 
 	// Wrap with metrics collection
-	observedValidator := observability.NewObservedValidator(leaseAwareValidator, consts.ResourceTypeDynamoGraphDeployment)
+	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoGraphDeployment)
 
 	webhook := admission.
 		WithCustomValidator(mgr.GetScheme(), object, observedValidator).

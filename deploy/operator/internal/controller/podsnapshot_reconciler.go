@@ -403,7 +403,7 @@ func (sr *PodSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(podSnapshotContentToPodSnapshot),
 			builder.WithPredicates(podSnapshotContentEventFilter(sr.Config, sr.RuntimeConfig)),
 		).
-		Complete(sr)
+		Complete(commonController.WithNamespaceExclusion(sr, sr.RuntimeConfig))
 }
 
 // podSnapshotContentEventFilter admits PodSnapshotContent events by the namespace of the bound
@@ -414,7 +414,7 @@ func podSnapshotContentEventFilter(config *configv1alpha1.OperatorConfiguration,
 		if !ok {
 			return false
 		}
-		return commonController.NamespaceAllowed(config, runtimeConfig, o, content.Spec.PodSnapshotRef.Namespace)
+		return commonController.NamespaceAllowed(config, content.Spec.PodSnapshotRef.Namespace)
 	})
 }
 

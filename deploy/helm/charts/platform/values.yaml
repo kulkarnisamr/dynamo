@@ -80,17 +80,18 @@ dynamo-operator:
 
   # -- URL for the Model Express server if not deployed by this helm chart. This is ignored if Model Express server is installed by this helm chart (global.model-express.enabled is true).
   modelExpressURL: ""
-  # -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode for production deployments.
+  # -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode (the default) for production deployments.
   namespaceRestriction:
-    # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation and admission. Not supported for production.
+    # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production.
     enabled: false
-    # -- DEVELOPMENT AND TESTING ONLY: Target namespace. Defaults to the Helm release namespace.
+    # -- DEVELOPMENT AND TESTING ONLY: Keep validation owned by this namespaced operator. When false, its validator is a compatibility fallback that stands down for a capable cluster-wide operator. CRD schema/CEL validation always applies; defaulting, mutation, and conversion remain cluster-wide. Disabled by default.
+    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace.
     targetNamespace:
-    # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease settings.
+    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode.
     lease:
-      # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease duration.
+      # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease duration.
       duration: 30s
-      # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease renewal interval.
+      # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease renewal interval.
       renewInterval: 10s
 
   # -- DEVELOPMENT AND TESTING ONLY: GPU discovery settings for namespace-restricted operators.
@@ -237,7 +238,7 @@ dynamo-operator:
     # -- Timeout in seconds for webhook validation calls. If the webhook doesn't respond within this time, the request will be handled according to the failurePolicy.
     timeoutSeconds: 10
 
-    # -- Unsupported; must remain empty. Helm configures global admission for the cluster-wide operator and target-namespace admission for restricted operators.
+    # -- Unsupported; must remain empty. Admission and conversion webhooks are always global and owned by the cluster-wide operator. Installation fails if set.
     namespaceSelector: {}
 
     # cert-manager integration for automated certificate lifecycle management
