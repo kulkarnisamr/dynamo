@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use dynamo_kv_router::{
-    KvSchedulerError, PrefillLoadEstimator, SharedKvCache,
+    KvSchedulerError, PrefillLoadEstimator, SharedKvCache, TrackingHashContext, TrackingHashScope,
     config::{KvRouterConfig, RouterConfigOverride, min_initial_workers_from_env},
     indexer::{KvRouterError, RoutingDecisionHashes},
     protocols::KV_EVENT_SUBJECT,
@@ -225,6 +225,8 @@ where
     cancellation_token: CancellationToken,
     client: Client,
     is_eagle: bool,
+    tracking_hash: TrackingHashContext,
+    tracking_model_name: String,
     _served_indexer_handle: Option<ServedIndexerHandle>,
     /// Optional external shared KV cache pool. When present, `find_best_match`
     /// queries it in parallel with the indexer and factors shared hits into scoring.
@@ -256,6 +258,8 @@ where
     ) -> Result<Self> {
         let kv_router_config = kv_router_config.unwrap_or_default();
         kv_router_config.validate()?;
+        let tracking_hash = TrackingHashContext::from_config(&kv_router_config)?;
+        let tracking_model_name = model_name.clone().unwrap_or_default();
         let component = endpoint.component();
         // Router-owned tasks derive from this token so a rebuild cannot cancel the runtime.
         let cancellation_token = component.drt().child_token();
@@ -361,6 +365,8 @@ where
             cancellation_token,
             client,
             is_eagle,
+            tracking_hash,
+            tracking_model_name,
             _served_indexer_handle: served_indexer_handle,
             shared_cache,
             lora_filter,
@@ -382,6 +388,14 @@ where
 
     pub fn is_eagle(&self) -> bool {
         self.is_eagle
+    }
+
+    fn tracking_hash_scope(&self) -> TrackingHashScope<'_> {
+        TrackingHashScope {
+            model_name: &self.tracking_model_name,
+            routing_group: "default",
+            block_size: self.block_size,
+        }
     }
 
     fn cache_hit_estimates_from_tiered_matches(
@@ -566,8 +580,9 @@ where
         // Compute seq_hashes only if scheduler needs it for active blocks tracking
         let maybe_seq_hashes = tracing::info_span!("kv_router.compute_seq_hashes").in_scope(|| {
             self.kv_router_config.compute_seq_hashes_for_tracking(
+                &self.tracking_hash,
+                self.tracking_hash_scope(),
                 tokens,
-                self.block_size,
                 router_config_override,
                 hash_options,
                 Some(&block_hashes),
@@ -774,8 +789,9 @@ where
         };
 
         let maybe_seq_hashes = self.kv_router_config.compute_seq_hashes_for_tracking(
+            &self.tracking_hash,
+            self.tracking_hash_scope(),
             tokens,
-            self.block_size,
             router_config_override,
             hash_options,
             None,
@@ -973,8 +989,9 @@ where
         let block_hashes = compute_block_hash_for_seq(tokens, self.block_size, hash_options);
 
         let maybe_seq_hashes = self.kv_router_config.compute_seq_hashes_for_tracking(
+            &self.tracking_hash,
+            self.tracking_hash_scope(),
             tokens,
-            self.block_size,
             router_config_override,
             hash_options,
             Some(&block_hashes),
