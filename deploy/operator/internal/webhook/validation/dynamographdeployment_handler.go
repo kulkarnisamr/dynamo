@@ -46,9 +46,9 @@ const (
 // DynamoGraphDeploymentHandler is a handler for validating DynamoGraphDeployment resources.
 // It is a thin wrapper around DynamoGraphDeploymentValidator.
 type DynamoGraphDeploymentHandler struct {
-	mgr               manager.Manager
-	operatorPrincipal string
-	groveEnabled      bool
+	mgr                 manager.Manager
+	operatorPrincipal   string
+	defaultGroveEnabled bool
 }
 
 // dynamoGraphDeploymentV1Alpha1Handler keeps the previous endpoint available
@@ -65,9 +65,9 @@ type dynamoGraphDeploymentV1Alpha1Handler struct {
 // groveEnabled reflects the operator's runtime Grove configuration.
 func NewDynamoGraphDeploymentHandler(mgr manager.Manager, operatorPrincipal string, groveEnabled bool) *DynamoGraphDeploymentHandler {
 	return &DynamoGraphDeploymentHandler{
-		mgr:               mgr,
-		operatorPrincipal: operatorPrincipal,
-		groveEnabled:      groveEnabled,
+		mgr:                 mgr,
+		operatorPrincipal:   operatorPrincipal,
+		defaultGroveEnabled: groveEnabled,
 	}
 }
 
@@ -95,7 +95,7 @@ func (h *DynamoGraphDeploymentHandler) validateCreate(
 	logger.Info("validate create", "name", deployment.Name, "namespace", deployment.Namespace)
 
 	// Create validator with manager for API group detection and perform validation
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.effectiveGroveGate(ctx))
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled(ctx))
 	return validator.Validate(ctx, deployment)
 }
 
@@ -134,7 +134,7 @@ func (h *DynamoGraphDeploymentHandler) validateUpdate(
 	}
 
 	// Create validator with manager for API group detection and perform validation.
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.effectiveGroveGate(ctx))
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled(ctx))
 	warnings, err := validator.Validate(ctx, newDeployment)
 	if err != nil {
 		return warnings, err
@@ -171,11 +171,11 @@ func (h *DynamoGraphDeploymentHandler) ValidateDelete(ctx context.Context, obj r
 	return h.validateDelete(ctx, obj, nvidiacomv1beta1.DynamoGraphDeploymentGVK)
 }
 
-func (h *DynamoGraphDeploymentHandler) effectiveGroveGate(ctx context.Context) bool {
+func (h *DynamoGraphDeploymentHandler) groveEnabled(ctx context.Context) bool {
 	if gates, ok := features.FromContext(ctx); ok {
 		return gates.Grove
 	}
-	return h.groveEnabled
+	return h.defaultGroveEnabled
 }
 
 func (h *DynamoGraphDeploymentHandler) validateDelete(

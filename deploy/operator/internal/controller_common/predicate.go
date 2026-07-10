@@ -38,25 +38,6 @@ type ExcludedNamespacesInterface interface {
 	Contains(namespace string) bool
 }
 
-// IsNamespaceExcluded reports whether cluster-wide reconciliation is disabled
-// for a namespace by a namespaced operator installation.
-func IsNamespaceExcluded(runtimeConfig *RuntimeConfig, namespace string) bool {
-	return namespace != "" && runtimeConfig != nil && runtimeConfig.ExcludedNamespaces != nil &&
-		runtimeConfig.ExcludedNamespaces.Contains(namespace)
-}
-
-// ShouldSkipReconciliation applies the namespace exclusion guard to a queued request.
-func ShouldSkipReconciliation(ctx context.Context, runtimeConfig *RuntimeConfig, namespace string) bool {
-	if !IsNamespaceExcluded(runtimeConfig, namespace) {
-		return false
-	}
-	log.FromContext(ctx).V(1).Info(
-		"Skipping reconciliation because namespace is managed by a namespaced operator",
-		"namespace", namespace,
-	)
-	return true
-}
-
 // DetectGroveAvailability checks if Grove is available by checking if the Grove API group is registered
 func DetectGroveAvailability(ctx context.Context, mgr ctrl.Manager) bool {
 	return detectAPIGroupAvailability(ctx, mgr, "grove.io", nil)

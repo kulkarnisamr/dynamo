@@ -1697,16 +1697,14 @@ func TestDynamoGraphDeploymentValidator_Validate(t *testing.T) {
 				nvidiacomv1beta1.DynamoGraphDeploymentGVK,
 				tt.userInfo,
 			)
-			validator := handler
-
 			var (
 				warnings []string
 				err      error
 			)
 			if tt.oldDeployment == nil {
-				warnings, err = validator.ValidateCreate(ctx, currentBeta)
+				warnings, err = handler.ValidateCreate(ctx, currentBeta)
 			} else {
-				warnings, err = validator.ValidateUpdate(ctx, oldBeta, currentBeta)
+				warnings, err = handler.ValidateUpdate(ctx, oldBeta, currentBeta)
 			}
 			assertBetaValidationErrors(t, err, tt.wantWebhookErrs)
 			if tt.notWantErr != "" && err != nil && strings.Contains(err.Error(), tt.notWantErr) {

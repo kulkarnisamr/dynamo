@@ -84,7 +84,6 @@ dynamo-operator:
   namespaceRestriction:
     # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production.
     enabled: false
-    # -- DEVELOPMENT AND TESTING ONLY: Keep validation owned by this namespaced operator. When false, its validator is a compatibility fallback that stands down for a capable cluster-wide operator. CRD schema/CEL validation always applies; defaulting, mutation, and conversion remain cluster-wide. Disabled by default.
     # -- DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace.
     targetNamespace:
     # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode.

@@ -343,9 +343,7 @@ func main() {
 	// their feature snapshots but never delegates validation.
 	var leaseManager *namespace_scope.LeaseManager
 	var leaseWatcher *namespace_scope.LeaseWatcher
-	if restrictedNamespace != "" {
-		setupLog.Info("Admission capability verified; delaying the reconciliation Lease until feature detection completes")
-	} else {
+	if restrictedNamespace == "" {
 		setupLog.Info("Setting up namespace reconciliation lease watcher")
 
 		leaseWatcher, err = namespace_scope.NewLeaseWatcher(mgr.GetConfig())
@@ -836,8 +834,50 @@ func registerWebhookHandlers(
 	if operatorCfg.Namespace.Restricted != "" {
 		return fmt.Errorf("defaulting, mutation, and conversion webhooks can only be registered by the cluster-wide operator")
 	}
-	if err := registerValidationWebhookHandlers(mgr, operatorCfg, runtimeConfig); err != nil {
-		return err
+
+	var operatorPrincipal string
+	if sa, ns := os.Getenv("POD_SERVICE_ACCOUNT"), os.Getenv("POD_NAMESPACE"); sa != "" && ns != "" {
+		operatorPrincipal = fmt.Sprintf("system:serviceaccount:%s:%s", ns, sa)
+		setupLog.Info("Detected operator principal from downward API", "principal", operatorPrincipal)
+	} else {
+		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
+	}
+
+	// Temporary internal gate for GMS + Snapshot.
+	if os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1" {
+		setupLog.Info(
+			"INTERNAL OVERRIDE: GMS + Snapshot admission rule disabled via env var; do NOT enable in production",
+			"envVar", consts.DynamoOperatorAllowGMSSnapshotEnvVar,
+		)
+	}
+
+	setupLog.Info("Registering validation webhooks")
+
+	dcdHandler := webhookvalidation.NewDynamoComponentDeploymentHandler()
+	if err := dcdHandler.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoComponentDeployment webhook: %w", err)
+	}
+
+	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal, runtimeConfig.GroveEnabled)
+	if err := dgdHandler.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeployment webhook: %w", err)
+	}
+
+	dckptHandler := webhookvalidation.NewDynamoCheckpointHandler()
+	if err := dckptHandler.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoCheckpoint webhook: %w", err)
+	}
+
+	dmHandler := webhookvalidation.NewDynamoModelHandler()
+	if err := dmHandler.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoModel webhook: %w", err)
+	}
+
+	dgdrHandler := webhookvalidation.NewDynamoGraphDeploymentRequestHandler(
+		true, ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
+	)
+	if err := dgdrHandler.RegisterWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest webhook: %w", err)
 	}
 
 	if err := ctrl.NewWebhookManagedBy(mgr, &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}).
@@ -885,59 +925,5 @@ func registerWebhookHandlers(
 	}
 
 	setupLog.Info("Webhooks registered successfully")
-	return nil
-}
-
-func registerValidationWebhookHandlers(
-	mgr ctrl.Manager,
-	operatorCfg *configv1alpha1.OperatorConfiguration,
-	runtimeConfig *commonController.RuntimeConfig,
-) error {
-	var operatorPrincipal string
-	if sa, ns := os.Getenv("POD_SERVICE_ACCOUNT"), os.Getenv("POD_NAMESPACE"); sa != "" && ns != "" {
-		operatorPrincipal = fmt.Sprintf("system:serviceaccount:%s:%s", ns, sa)
-		setupLog.Info("Detected operator principal from downward API", "principal", operatorPrincipal)
-	} else {
-		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
-	}
-
-	// Temporary internal gate for GMS + Snapshot.
-	if os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1" {
-		setupLog.Info(
-			"INTERNAL OVERRIDE: GMS + Snapshot admission rule disabled via env var; do NOT enable in production",
-			"envVar", consts.DynamoOperatorAllowGMSSnapshotEnvVar,
-		)
-	}
-
-	setupLog.Info("Registering validation webhooks")
-
-	dcdHandler := webhookvalidation.NewDynamoComponentDeploymentHandler()
-	if err := dcdHandler.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoComponentDeployment webhook: %w", err)
-	}
-
-	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal, runtimeConfig.GroveEnabled)
-	if err := dgdHandler.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoGraphDeployment webhook: %w", err)
-	}
-
-	dckptHandler := webhookvalidation.NewDynamoCheckpointHandler()
-	if err := dckptHandler.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoCheckpoint webhook: %w", err)
-	}
-
-	dmHandler := webhookvalidation.NewDynamoModelHandler()
-	if err := dmHandler.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoModel webhook: %w", err)
-	}
-
-	dgdrHandler := webhookvalidation.NewDynamoGraphDeploymentRequestHandler(
-		operatorCfg.Namespace.Restricted == "", ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
-	)
-	if err := dgdrHandler.RegisterWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest webhook: %w", err)
-	}
-
-	setupLog.Info("Validation webhooks registered successfully")
 	return nil
 }
