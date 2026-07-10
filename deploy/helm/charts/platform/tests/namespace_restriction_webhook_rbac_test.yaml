@@ -20,7 +20,6 @@ tests:
       - equal:
           path: rules[0].verbs
           value:
-            - get
             - list
         documentSelector:
           path: kind
