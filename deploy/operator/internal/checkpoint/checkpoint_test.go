@@ -25,6 +25,7 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	gms "github.com/ai-dynamo/dynamo/deploy/operator/internal/gms"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 	"github.com/stretchr/testify/assert"
@@ -462,7 +463,7 @@ func TestCreateOrGetAutoCheckpointSetsDefaultArtifactVersion(t *testing.T) {
 }
 
 func TestCreateOrGetAutoCheckpointRejectsGMSSnapshotWhenGateDisabled(t *testing.T) {
-	t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "")
+	t.Setenv(features.GMSSnapshotEnvVar, "")
 	ctx := context.Background()
 	s := testScheme()
 	c := fake.NewClientBuilder().WithScheme(s).Build()
@@ -788,7 +789,7 @@ func TestResolveCheckpointForService(t *testing.T) {
 	})
 
 	t.Run("checkpointRef resolves ready CR", func(t *testing.T) {
-		t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "1")
+		t.Setenv(features.GMSSnapshotEnvVar, "1")
 		hash, err := ComputeIdentityHash(testIdentity())
 		require.NoError(t, err)
 		ckpt := &nvidiacomv1alpha1.DynamoCheckpoint{
@@ -818,7 +819,7 @@ func TestResolveCheckpointForService(t *testing.T) {
 	})
 
 	t.Run("checkpointRef rejects GMS checkpoint when gate is disabled", func(t *testing.T) {
-		t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "")
+		t.Setenv(features.GMSSnapshotEnvVar, "")
 		hash, err := ComputeIdentityHash(testIdentity())
 		require.NoError(t, err)
 		ckpt := &nvidiacomv1alpha1.DynamoCheckpoint{

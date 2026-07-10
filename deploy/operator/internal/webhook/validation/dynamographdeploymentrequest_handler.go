@@ -40,19 +40,11 @@ const (
 
 // DynamoGraphDeploymentRequestHandler is a handler for validating DynamoGraphDeploymentRequest resources.
 // It is a thin wrapper around DynamoGraphDeploymentRequestValidator.
-type DynamoGraphDeploymentRequestHandler struct {
-	isClusterWideOperator bool
-	gpuDiscoveryEnabled   bool
-}
+type DynamoGraphDeploymentRequestHandler struct{}
 
 // NewDynamoGraphDeploymentRequestHandler creates a new handler for DynamoGraphDeploymentRequest Webhook.
-// isClusterWide indicates whether the operator has cluster-wide permissions.
-// gpuDiscoveryEnabled indicates whether a ClusterRole for node read access was provisioned by Helm.
-func NewDynamoGraphDeploymentRequestHandler(isClusterWide bool, gpuDiscoveryEnabled bool) *DynamoGraphDeploymentRequestHandler {
-	return &DynamoGraphDeploymentRequestHandler{
-		isClusterWideOperator: isClusterWide,
-		gpuDiscoveryEnabled:   gpuDiscoveryEnabled,
-	}
+func NewDynamoGraphDeploymentRequestHandler() *DynamoGraphDeploymentRequestHandler {
+	return &DynamoGraphDeploymentRequestHandler{}
 }
 
 // ValidateCreate validates a DynamoGraphDeploymentRequest create request.
@@ -71,8 +63,7 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateCreate(ctx context.Context
 	logger.Info("validate create", "name", request.Name, "namespace", request.Namespace)
 
 	// Create validator and perform validation
-	isClusterWide, gpuDiscoveryEnabled := h.effectiveGPUDiscovery(ctx)
-	validator := NewDynamoGraphDeploymentRequestValidator(request, isClusterWide, gpuDiscoveryEnabled)
+	validator := NewDynamoGraphDeploymentRequestValidator(request, features.MustFromContext(ctx))
 	return validator.Validate()
 }
 
@@ -103,8 +94,7 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateUpdate(ctx context.Context
 	}
 
 	// Create validator and perform validation
-	isClusterWide, gpuDiscoveryEnabled := h.effectiveGPUDiscovery(ctx)
-	validator := NewDynamoGraphDeploymentRequestValidator(newRequest, isClusterWide, gpuDiscoveryEnabled)
+	validator := NewDynamoGraphDeploymentRequestValidator(newRequest, features.MustFromContext(ctx))
 	return validator.ValidateUpdate(oldRequest)
 }
 
@@ -125,13 +115,6 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateDelete(ctx context.Context
 
 	// No special validation needed for deletion
 	return nil, nil
-}
-
-func (h *DynamoGraphDeploymentRequestHandler) effectiveGPUDiscovery(ctx context.Context) (bool, bool) {
-	if gates, ok := features.FromContext(ctx); ok {
-		return false, gates.GPUDiscovery
-	}
-	return h.isClusterWideOperator, h.gpuDiscoveryEnabled
 }
 
 // RegisterWithManager registers the webhook with the manager.

@@ -20,7 +20,6 @@ package validation
 import (
 	"context"
 	"fmt"
-	"os"
 
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
@@ -88,16 +87,12 @@ func (h *DynamoCheckpointHandler) RegisterWithManager(mgr manager.Manager) error
 }
 
 func validateDynamoCheckpointGMSSnapshot(ctx context.Context, ckpt *nvidiacomv1alpha1.DynamoCheckpoint) error {
-	gmsSnapshotEnabled := os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1"
-	if gates, ok := features.FromContext(ctx); ok {
-		gmsSnapshotEnabled = gates.GMSSnapshot
-	}
 	// A DynamoCheckpoint is itself a Snapshot resource; service specs pass checkpoint.enabled instead.
-	if err := checkpoint.ValidateGMSSnapshotGateEnabled(
+	if err := checkpoint.ValidateGMSSnapshotGate(
 		"spec.gpuMemoryService",
 		true,
 		ckpt.Spec.GPUMemoryService,
-		gmsSnapshotEnabled,
+		features.MustFromContext(ctx),
 	); err != nil {
 		return err
 	}

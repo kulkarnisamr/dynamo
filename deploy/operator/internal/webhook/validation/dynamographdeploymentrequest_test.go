@@ -22,20 +22,21 @@ import (
 	"testing"
 
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 	vram := float64(81920)
 	gpuCount := int32(8)
+	gpuDiscoveryGates := features.Gates{GPUDiscovery: true}
 
 	// errMsg: if non-empty, an error is expected and each newline-separated substring must appear in it.
 	tests := []struct {
-		name                string
-		request             *nvidiacomv1beta1.DynamoGraphDeploymentRequest
-		isClusterWide       bool
-		gpuDiscoveryEnabled bool
-		errMsg              string
+		name    string
+		request *nvidiacomv1beta1.DynamoGraphDeploymentRequest
+		gates   features.Gates
+		errMsg  string
 	}{
 		{
 			name: "valid request",
@@ -47,7 +48,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					Image:   "profiler:latest",
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 
 		{
@@ -61,8 +62,8 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SearchStrategy: nvidiacomv1beta1.SearchStrategyThorough,
 				},
 			},
-			isClusterWide: true,
-			errMsg:        `spec.searchStrategy "thorough" is incompatible with spec.backend "auto"`,
+			gates:  gpuDiscoveryGates,
+			errMsg: `spec.searchStrategy "thorough" is incompatible with spec.backend "auto"`,
 		},
 		{
 			name: "rapid + auto is valid (default combination)",
@@ -75,7 +76,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SearchStrategy: nvidiacomv1beta1.SearchStrategyRapid,
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "thorough + vllm is valid",
@@ -88,7 +89,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SearchStrategy: nvidiacomv1beta1.SearchStrategyThorough,
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "thorough + trtllm is valid",
@@ -101,7 +102,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SearchStrategy: nvidiacomv1beta1.SearchStrategyThorough,
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "thorough + sglang is valid",
@@ -114,10 +115,10 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SearchStrategy: nvidiacomv1beta1.SearchStrategyThorough,
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
-			name: "namespace-scoped operator with manual hardware config (should pass)",
+			name: "manual hardware config passes with GPU discovery disabled",
 			request: &nvidiacomv1beta1.DynamoGraphDeploymentRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-dgdr", Namespace: "default"},
 				Spec: nvidiacomv1beta1.DynamoGraphDeploymentRequestSpec{
@@ -131,11 +132,9 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			isClusterWide:       false,
-			gpuDiscoveryEnabled: false,
 		},
 		{
-			name: "namespace-scoped operator with GPU discovery enabled (should pass without manual config)",
+			name: "GPU discovery passes without manual hardware config",
 			request: &nvidiacomv1beta1.DynamoGraphDeploymentRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-dgdr", Namespace: "default"},
 				Spec: nvidiacomv1beta1.DynamoGraphDeploymentRequestSpec{
@@ -144,11 +143,10 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					Image:   "profiler:latest",
 				},
 			},
-			isClusterWide:       false,
-			gpuDiscoveryEnabled: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
-			name: "namespace-scoped operator with GPU discovery disabled and no hardware config (should error)",
+			name: "GPU discovery disabled requires manual hardware config",
 			request: &nvidiacomv1beta1.DynamoGraphDeploymentRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-dgdr", Namespace: "default"},
 				Spec: nvidiacomv1beta1.DynamoGraphDeploymentRequestSpec{
@@ -157,9 +155,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					Image:   "profiler:latest",
 				},
 			},
-			isClusterWide:       false,
-			gpuDiscoveryEnabled: false,
-			errMsg:              "GPU hardware configuration required: GPU discovery is disabled",
+			errMsg: "GPU hardware configuration required: GPU discovery is disabled",
 		},
 		{
 			name: "thorough+auto is invalid regardless of image",
@@ -172,8 +168,8 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					Image:          "",
 				},
 			},
-			isClusterWide: true,
-			errMsg:        "spec.searchStrategy",
+			gates:  gpuDiscoveryGates,
+			errMsg: "spec.searchStrategy",
 		},
 
 		// SLA.OptimizationType validation
@@ -190,7 +186,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "sla.optimizationType throughput is valid",
@@ -205,7 +201,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "sla.optimizationType cost is invalid",
@@ -220,8 +216,8 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			isClusterWide: true,
-			errMsg:        `spec.sla.optimizationType "cost" is invalid: must be "latency" or "throughput"`,
+			gates:  gpuDiscoveryGates,
+			errMsg: `spec.sla.optimizationType "cost" is invalid: must be "latency" or "throughput"`,
 		},
 		{
 			name: "sla.optimizationType empty string is invalid",
@@ -236,8 +232,8 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					},
 				},
 			},
-			isClusterWide: true,
-			errMsg:        `spec.sla.optimizationType "" is invalid`,
+			gates:  gpuDiscoveryGates,
+			errMsg: `spec.sla.optimizationType "" is invalid`,
 		},
 		{
 			name: "nil sla is valid (field is optional)",
@@ -250,7 +246,7 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SLA:     nil,
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 		{
 			name: "sla without optimizationType is valid",
@@ -263,13 +259,13 @@ func TestDynamoGraphDeploymentRequestValidator_Validate(t *testing.T) {
 					SLA:     &nvidiacomv1beta1.SLASpec{},
 				},
 			},
-			isClusterWide: true,
+			gates: gpuDiscoveryGates,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validator := NewDynamoGraphDeploymentRequestValidator(tt.request, tt.isClusterWide, tt.gpuDiscoveryEnabled)
+			validator := NewDynamoGraphDeploymentRequestValidator(tt.request, tt.gates)
 			_, err := validator.Validate()
 
 			wantErr := tt.errMsg != ""
@@ -445,7 +441,10 @@ func TestDynamoGraphDeploymentRequestValidator_ValidateUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validator := NewDynamoGraphDeploymentRequestValidator(tt.newRequest, true, true)
+			validator := NewDynamoGraphDeploymentRequestValidator(
+				tt.newRequest,
+				features.Gates{GPUDiscovery: true},
+			)
 			warnings, err := validator.ValidateUpdate(tt.oldRequest)
 
 			if (err != nil) != tt.wantErr {

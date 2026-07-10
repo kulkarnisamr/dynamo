@@ -19,32 +19,22 @@ package checkpoint
 
 import (
 	"fmt"
-	"os"
 
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
-	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 )
 
-func ValidateGMSSnapshotGate(fieldPath string, checkpointEnabled bool, gms *nvidiacomv1alpha1.GPUMemoryServiceSpec) error {
-	return ValidateGMSSnapshotGateEnabled(
-		fieldPath,
-		checkpointEnabled,
-		gms,
-		os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1",
-	)
-}
-
-// ValidateGMSSnapshotGateEnabled validates the gate using an explicit effective value.
-func ValidateGMSSnapshotGateEnabled(
+// ValidateGMSSnapshotGate validates GMS + Snapshot against the effective gates.
+func ValidateGMSSnapshotGate(
 	fieldPath string,
 	checkpointEnabled bool,
 	gms *nvidiacomv1alpha1.GPUMemoryServiceSpec,
-	enabled bool,
+	gates features.Gates,
 ) error {
 	if !checkpointEnabled || gms == nil || !gms.Enabled {
 		return nil
 	}
-	if enabled {
+	if gates.GMSSnapshot {
 		return nil
 	}
 	return fmt.Errorf(

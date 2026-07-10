@@ -20,7 +20,6 @@ import (
 )
 
 func TestValidateDynamoCheckpointGMSSnapshotRejectsUnpreparedTemplate(t *testing.T) {
-	t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "")
 	ckpt := &nvidiacomv1alpha1.DynamoCheckpoint{
 		Spec: nvidiacomv1alpha1.DynamoCheckpointSpec{
 			GPUMemoryService: &nvidiacomv1alpha1.GPUMemoryServiceSpec{Enabled: true},
@@ -42,7 +41,6 @@ func TestValidateDynamoCheckpointGMSSnapshotRejectsUnpreparedTemplate(t *testing
 }
 
 func TestValidateDynamoCheckpointGMSSnapshotAllowsPreparedTemplate(t *testing.T) {
-	t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "1")
 	claimTemplateName := "checkpoint-test-worker-gpu"
 	clientContainer := func(name string) corev1.Container {
 		return corev1.Container{
@@ -87,5 +85,6 @@ func TestValidateDynamoCheckpointGMSSnapshotAllowsPreparedTemplate(t *testing.T)
 		},
 	}
 
-	require.NoError(t, validateDynamoCheckpointGMSSnapshot(context.Background(), ckpt))
+	ctx := features.WithGates(context.Background(), features.Gates{GMSSnapshot: true})
+	require.NoError(t, validateDynamoCheckpointGMSSnapshot(ctx, ckpt))
 }

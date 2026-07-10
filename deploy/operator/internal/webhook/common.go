@@ -99,7 +99,7 @@ func (v *FeatureAwareValidator) contextFor(
 	obj runtime.Object,
 ) (context.Context, admission.Warnings) {
 	if v.resolver == nil {
-		return ctx, nil
+		return features.WithGates(ctx, features.Gates{}), nil
 	}
 	namespace := ""
 	clientObj, ok := obj.(client.Object)

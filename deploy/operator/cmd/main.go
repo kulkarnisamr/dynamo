@@ -66,7 +66,6 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	internalcert "github.com/ai-dynamo/dynamo/deploy/operator/internal/cert"
-	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/controller"
 	commonController "github.com/ai-dynamo/dynamo/deploy/operator/internal/controller_common"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
@@ -499,16 +498,20 @@ func main() {
 		"istio", runtimeConfig.IstioEnabled,
 	)
 
-	admissionGates := features.Gates{
-		GMSSnapshot:      os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1",
-		Checkpoint:       operatorCfg.Checkpoint.Enabled,
-		Grove:            runtimeConfig.GroveEnabled,
-		LWS:              runtimeConfig.LWSEnabled,
-		KaiScheduler:     runtimeConfig.KaiSchedulerEnabled,
-		VolcanoScheduler: runtimeConfig.VolcanoSchedulerEnabled,
-		DRA:              runtimeConfig.DRAEnabled,
-		Istio:            runtimeConfig.IstioEnabled,
-		GPUDiscovery:     ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
+	admissionGates := features.FromEnvironment()
+	admissionGates.Checkpoint = operatorCfg.Checkpoint.Enabled
+	admissionGates.Grove = runtimeConfig.GroveEnabled
+	admissionGates.LWS = runtimeConfig.LWSEnabled
+	admissionGates.KaiScheduler = runtimeConfig.KaiSchedulerEnabled
+	admissionGates.VolcanoScheduler = runtimeConfig.VolcanoSchedulerEnabled
+	admissionGates.DRA = runtimeConfig.DRAEnabled
+	admissionGates.Istio = runtimeConfig.IstioEnabled
+	admissionGates.GPUDiscovery = ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true)
+	if admissionGates.GMSSnapshot {
+		setupLog.Info(
+			"INTERNAL OVERRIDE: GMS + Snapshot admission rule disabled via env var; do NOT enable in production",
+			"envVar", features.GMSSnapshotEnvVar,
+		)
 	}
 	if restrictedNamespace != "" {
 		leaseManager, err = namespace_scope.NewLeaseManager(
@@ -843,14 +846,6 @@ func registerWebhookHandlers(
 		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
 	}
 
-	// Temporary internal gate for GMS + Snapshot.
-	if os.Getenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar) == "1" {
-		setupLog.Info(
-			"INTERNAL OVERRIDE: GMS + Snapshot admission rule disabled via env var; do NOT enable in production",
-			"envVar", consts.DynamoOperatorAllowGMSSnapshotEnvVar,
-		)
-	}
-
 	setupLog.Info("Registering validation webhooks")
 
 	dcdHandler := webhookvalidation.NewDynamoComponentDeploymentHandler()
@@ -858,7 +853,7 @@ func registerWebhookHandlers(
 		return fmt.Errorf("unable to register DynamoComponentDeployment webhook: %w", err)
 	}
 
-	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal, runtimeConfig.GroveEnabled)
+	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal)
 	if err := dgdHandler.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register DynamoGraphDeployment webhook: %w", err)
 	}
@@ -873,9 +868,7 @@ func registerWebhookHandlers(
 		return fmt.Errorf("unable to register DynamoModel webhook: %w", err)
 	}
 
-	dgdrHandler := webhookvalidation.NewDynamoGraphDeploymentRequestHandler(
-		true, ptr.Deref(operatorCfg.GPU.DiscoveryEnabled, true),
-	)
+	dgdrHandler := webhookvalidation.NewDynamoGraphDeploymentRequestHandler()
 	if err := dgdrHandler.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register DynamoGraphDeploymentRequest webhook: %w", err)
 	}

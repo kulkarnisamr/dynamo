@@ -12,6 +12,13 @@ import (
 	"testing"
 )
 
+func TestFromEnvironment(t *testing.T) {
+	t.Setenv(GMSSnapshotEnvVar, "1")
+	if !FromEnvironment().GMSSnapshot {
+		t.Fatal("GMS Snapshot environment gate was not enabled")
+	}
+}
+
 func TestGatesJSONIncludesDisabledValues(t *testing.T) {
 	data, err := json.Marshal(Gates{})
 	if err != nil {
@@ -75,8 +82,8 @@ func TestResolveRejectsInvalidKnownValue(t *testing.T) {
 
 func TestGatesContext(t *testing.T) {
 	want := Gates{GMSSnapshot: true}
-	got, ok := FromContext(WithGates(context.Background(), want))
-	if !ok || got != want {
-		t.Fatalf("FromContext() = %#v, %v, want %#v, true", got, ok, want)
+	got := MustFromContext(WithGates(context.Background(), want))
+	if got != want {
+		t.Fatalf("MustFromContext() = %#v, want %#v", got, want)
 	}
 }

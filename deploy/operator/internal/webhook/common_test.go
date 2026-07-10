@@ -18,7 +18,6 @@ import (
 )
 
 var errValidationCalled = errors.New("validation called")
-var errFeatureGatesMissing = errors.New("feature gates missing from admission context")
 
 type staticGateResolver map[string]features.Gates
 
@@ -45,9 +44,7 @@ func (rejectingValidator) ValidateDelete(ctx context.Context, _ runtime.Object) 
 }
 
 func validationCalled(ctx context.Context) error {
-	if _, ok := features.FromContext(ctx); !ok {
-		return errFeatureGatesMissing
-	}
+	features.MustFromContext(ctx)
 	return errValidationCalled
 }
 

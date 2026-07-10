@@ -26,6 +26,7 @@ import (
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/checkpoint"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dra"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -510,7 +511,7 @@ func TestBuildCheckpointJobPreservesPreparedEnvAndSharedMemory(t *testing.T) {
 }
 
 func TestCheckpointReconciler_handlePendingFailsUnpreparedGMSCheckpoint(t *testing.T) {
-	t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "1")
+	t.Setenv(features.GMSSnapshotEnvVar, "1")
 	s := checkpointTestScheme()
 	ckpt := makeTestCheckpoint(nvidiacomv1alpha1.DynamoCheckpointPhasePending)
 	ckpt.Spec.GPUMemoryService = &nvidiacomv1alpha1.GPUMemoryServiceSpec{
@@ -568,7 +569,7 @@ func TestCheckpointReconciler_Reconcile(t *testing.T) {
 	})
 
 	t.Run("GMS snapshot fails when gate is disabled", func(t *testing.T) {
-		t.Setenv(consts.DynamoOperatorAllowGMSSnapshotEnvVar, "")
+		t.Setenv(features.GMSSnapshotEnvVar, "")
 		ckpt := makeTestCheckpoint(nvidiacomv1alpha1.DynamoCheckpointPhasePending)
 		ckpt.Spec.GPUMemoryService = &nvidiacomv1alpha1.GPUMemoryServiceSpec{Enabled: true}
 		r := makeCheckpointReconciler(s, ckpt)

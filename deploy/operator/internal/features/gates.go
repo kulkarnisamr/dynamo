@@ -10,8 +10,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
+
+// GMSSnapshotEnvVar enables the temporary internal GMS + Snapshot gate when set to "1".
+const GMSSnapshotEnvVar = "DYN_OPERATOR_ALLOW_GMS_SNAPSHOT"
+
+// FromEnvironment returns feature gates controlled directly by process environment.
+func FromEnvironment() Gates {
+	return Gates{
+		GMSSnapshot: os.Getenv(GMSSnapshotEnvVar) == "1",
+	}
+}
 
 const (
 	// LeaseAnnotation stores the namespaced operator's effective feature gates.
@@ -109,8 +120,12 @@ func WithGates(ctx context.Context, gates Gates) context.Context {
 	return context.WithValue(ctx, gatesContextKey{}, gates)
 }
 
-// FromContext returns the request's effective admission gates.
-func FromContext(ctx context.Context) (Gates, bool) {
+// MustFromContext returns the request's effective admission gates.
+// Admission handlers must be wrapped by FeatureAwareValidator before use.
+func MustFromContext(ctx context.Context) Gates {
 	gates, ok := ctx.Value(gatesContextKey{}).(Gates)
-	return gates, ok
+	if !ok {
+		panic("feature gates missing from admission context")
+	}
+	return gates
 }

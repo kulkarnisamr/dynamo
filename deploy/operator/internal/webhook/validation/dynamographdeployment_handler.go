@@ -46,9 +46,8 @@ const (
 // DynamoGraphDeploymentHandler is a handler for validating DynamoGraphDeployment resources.
 // It is a thin wrapper around DynamoGraphDeploymentValidator.
 type DynamoGraphDeploymentHandler struct {
-	mgr                 manager.Manager
-	operatorPrincipal   string
-	defaultGroveEnabled bool
+	mgr               manager.Manager
+	operatorPrincipal string
 }
 
 // dynamoGraphDeploymentV1Alpha1Handler keeps the previous endpoint available
@@ -62,12 +61,10 @@ type dynamoGraphDeploymentV1Alpha1Handler struct {
 // mgr must not be nil.
 // operatorPrincipal is the full Kubernetes SA username of the operator, used to authorize
 // replica changes on scaling-adapter-enabled components (#7656).
-// groveEnabled reflects the operator's runtime Grove configuration.
-func NewDynamoGraphDeploymentHandler(mgr manager.Manager, operatorPrincipal string, groveEnabled bool) *DynamoGraphDeploymentHandler {
+func NewDynamoGraphDeploymentHandler(mgr manager.Manager, operatorPrincipal string) *DynamoGraphDeploymentHandler {
 	return &DynamoGraphDeploymentHandler{
-		mgr:                 mgr,
-		operatorPrincipal:   operatorPrincipal,
-		defaultGroveEnabled: groveEnabled,
+		mgr:               mgr,
+		operatorPrincipal: operatorPrincipal,
 	}
 }
 
@@ -95,7 +92,7 @@ func (h *DynamoGraphDeploymentHandler) validateCreate(
 	logger.Info("validate create", "name", deployment.Name, "namespace", deployment.Namespace)
 
 	// Create validator with manager for API group detection and perform validation
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled(ctx))
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, features.MustFromContext(ctx))
 	return validator.Validate(ctx, deployment)
 }
 
@@ -134,7 +131,7 @@ func (h *DynamoGraphDeploymentHandler) validateUpdate(
 	}
 
 	// Create validator with manager for API group detection and perform validation.
-	validator := NewDynamoGraphDeploymentValidator(h.mgr, h.groveEnabled(ctx))
+	validator := NewDynamoGraphDeploymentValidator(h.mgr, features.MustFromContext(ctx))
 	warnings, err := validator.Validate(ctx, newDeployment)
 	if err != nil {
 		return warnings, err
@@ -169,13 +166,6 @@ func (h *DynamoGraphDeploymentHandler) validateUpdate(
 // ValidateDelete validates a DynamoGraphDeployment delete request.
 func (h *DynamoGraphDeploymentHandler) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	return h.validateDelete(ctx, obj, nvidiacomv1beta1.DynamoGraphDeploymentGVK)
-}
-
-func (h *DynamoGraphDeploymentHandler) groveEnabled(ctx context.Context) bool {
-	if gates, ok := features.FromContext(ctx); ok {
-		return gates.Grove
-	}
-	return h.defaultGroveEnabled
 }
 
 func (h *DynamoGraphDeploymentHandler) validateDelete(

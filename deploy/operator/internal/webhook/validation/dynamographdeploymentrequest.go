@@ -23,25 +23,25 @@ import (
 	"fmt"
 
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // DynamoGraphDeploymentRequestValidator validates DynamoGraphDeploymentRequest resources.
 // This validator can be used by both webhooks and controllers for consistent validation.
 type DynamoGraphDeploymentRequestValidator struct {
-	request               *nvidiacomv1beta1.DynamoGraphDeploymentRequest
-	isClusterWideOperator bool
-	gpuDiscoveryEnabled   bool
+	request *nvidiacomv1beta1.DynamoGraphDeploymentRequest
+	gates   features.Gates
 }
 
 // NewDynamoGraphDeploymentRequestValidator creates a new validator for DynamoGraphDeploymentRequest.
-// isClusterWide indicates whether the operator has cluster-wide permissions.
-// gpuDiscoveryEnabled indicates whether Helm provisioned node read access for the operator.
-func NewDynamoGraphDeploymentRequestValidator(request *nvidiacomv1beta1.DynamoGraphDeploymentRequest, isClusterWide bool, gpuDiscoveryEnabled bool) *DynamoGraphDeploymentRequestValidator {
+func NewDynamoGraphDeploymentRequestValidator(
+	request *nvidiacomv1beta1.DynamoGraphDeploymentRequest,
+	gates features.Gates,
+) *DynamoGraphDeploymentRequestValidator {
 	return &DynamoGraphDeploymentRequestValidator{
-		request:               request,
-		isClusterWideOperator: isClusterWide,
-		gpuDiscoveryEnabled:   gpuDiscoveryEnabled,
+		request: request,
+		gates:   gates,
 	}
 }
 
@@ -108,9 +108,8 @@ func (v *DynamoGraphDeploymentRequestValidator) validateGPUHardwareInfo() error 
 		return nil
 	}
 
-	// No manual hardware config provided. Cluster-wide operators always have GPU discovery via node
-	// permissions. Namespace-scoped operators rely on Helm-provisioned GPU discovery (gpuDiscovery.enabled).
-	if v.isClusterWideOperator || v.gpuDiscoveryEnabled {
+	// No manual hardware config is required when GPU discovery is enabled.
+	if v.gates.GPUDiscovery {
 		return nil
 	}
 

@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -47,7 +48,7 @@ func (v *DynamoComponentDeploymentValidator) Validate(
 	dcd *nvidiacomv1beta1.DynamoComponentDeployment,
 ) (admission.Warnings, error) {
 	validation := &dynamoComponentDeploymentValidation{
-		sharedValidation: sharedValidation{ctx: ctx},
+		sharedValidation: sharedValidation{ctx: ctx, gates: features.MustFromContext(ctx)},
 	}
 
 	allErrs := validation.validateDynamoComponentDeployment(dcd)
@@ -69,7 +70,7 @@ func (v *DynamoComponentDeploymentValidator) ValidateUpdate(
 	newDCD *nvidiacomv1beta1.DynamoComponentDeployment,
 ) (admission.Warnings, error) {
 	validation := &dynamoComponentDeploymentValidation{
-		sharedValidation: sharedValidation{ctx: ctx},
+		sharedValidation: sharedValidation{ctx: ctx, gates: features.MustFromContext(ctx)},
 	}
 
 	allErrs := validation.validateDynamoComponentDeployment(newDCD)

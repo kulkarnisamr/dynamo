@@ -27,6 +27,7 @@ import (
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/dynamo"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	grovev1alpha1 "github.com/ai-dynamo/grove/operator/api/core/v1alpha1"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -41,19 +42,19 @@ import (
 
 // DynamoGraphDeploymentValidator validates v1beta1 DynamoGraphDeployment resources.
 type DynamoGraphDeploymentValidator struct {
-	mgr          ctrl.Manager
-	groveEnabled bool
+	mgr   ctrl.Manager
+	gates features.Gates
 }
 
 // NewDynamoGraphDeploymentValidator creates a validator for v1beta1 DynamoGraphDeployment.
 // mgr must not be nil.
 func NewDynamoGraphDeploymentValidator(
 	mgr ctrl.Manager,
-	groveEnabled bool,
+	gates features.Gates,
 ) *DynamoGraphDeploymentValidator {
 	return &DynamoGraphDeploymentValidator{
-		mgr:          mgr,
-		groveEnabled: groveEnabled,
+		mgr:   mgr,
+		gates: gates,
 	}
 }
 
@@ -61,7 +62,6 @@ func NewDynamoGraphDeploymentValidator(
 // API values and derived traversal state remain explicit validator arguments.
 type dynamoGraphDeploymentValidation struct {
 	sharedValidation
-	groveEnabled      bool
 	userInfo          *authenticationv1.UserInfo
 	operatorPrincipal string
 }
@@ -80,8 +80,7 @@ func (v *DynamoGraphDeploymentValidator) Validate(
 	deployment *nvidiacomv1beta1.DynamoGraphDeployment,
 ) (admission.Warnings, error) {
 	validation := &dynamoGraphDeploymentValidation{
-		sharedValidation: sharedValidation{ctx: ctx, mgr: v.mgr},
-		groveEnabled:     v.groveEnabled,
+		sharedValidation: sharedValidation{ctx: ctx, mgr: v.mgr, gates: v.gates},
 	}
 
 	allErrs := validation.validateDynamoGraphDeployment(deployment)
@@ -105,8 +104,7 @@ func (v *DynamoGraphDeploymentValidator) ValidateUpdate(
 	operatorPrincipal string,
 ) (admission.Warnings, error) {
 	validation := &dynamoGraphDeploymentValidation{
-		sharedValidation:  sharedValidation{ctx: ctx, mgr: v.mgr},
-		groveEnabled:      v.groveEnabled,
+		sharedValidation:  sharedValidation{ctx: ctx, mgr: v.mgr, gates: v.gates},
 		userInfo:          userInfo,
 		operatorPrincipal: operatorPrincipal,
 	}
@@ -126,7 +124,7 @@ func (v *dynamoGraphDeploymentValidation) validateDynamoGraphDeployment(
 		hasIntraPodFailover(&dgd.Spec),
 	)...)
 
-	grovePathway, grovePathwayRequirement := grovePathwayForDynamoGraphDeployment(v.groveEnabled, dgd)
+	grovePathway, grovePathwayRequirement := grovePathwayForDynamoGraphDeployment(v.gates.Grove, dgd)
 	specOpts := dynamoGraphDeploymentSpecValidationOptions{
 		dgdName:                 dgd.Name,
 		generation:              dgd.Generation,
