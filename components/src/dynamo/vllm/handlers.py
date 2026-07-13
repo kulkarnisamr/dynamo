@@ -85,7 +85,18 @@ from dynamo.vllm.kv_connector_protocols import (
 )
 
 from .args import Config
-from .constants import DisaggregationMode, EmbeddingTransferMode
+from .constants import (
+    DYNAMO_CACHE_SALT_PREFIX,
+    DisaggregationMode,
+    EmbeddingTransferMode,
+)
+from .engine_generate import build_prompt as _build_engine_generate_prompt
+from .engine_generate import (
+    build_sampling_params as _build_engine_generate_sampling_params,
+)
+from .engine_generate import merge_kv_transfer_params as _merge_kv_transfer_params
+from .engine_generate import payload as _engine_generate_payload
+from .engine_generate import priority as _engine_generate_priority
 from .engine_monitor import VllmEngineMonitor
 from .multimodal_utils.async_vision_encoder import AsyncVisionEncoder
 from .multimodal_utils.embed_assembler import build_mixed_embeds
@@ -479,10 +490,6 @@ def _nvext_extra_field_requested(request: Dict[str, Any], field: str) -> bool:
     )
 
 
-# Must match DYNAMO_CACHE_SALT_PREFIX in lib/kv-router/src/zmq_wire/extra_keys.rs.
-_DYNAMO_CACHE_SALT_PREFIX = "dynamo-cache-salt:"
-
-
 def _apply_nvext_cache_salt(request: Dict[str, Any], prompt: Any) -> None:
     """Pass an internally tagged cache salt to vLLM.
 
@@ -497,7 +504,7 @@ def _apply_nvext_cache_salt(request: Dict[str, Any], prompt: Any) -> None:
     for source in _iter_nvext_sources(request):
         cache_salt = source.get("cache_salt")
         if cache_salt:
-            prompt["cache_salt"] = f"{_DYNAMO_CACHE_SALT_PREFIX}{cache_salt}"
+            prompt["cache_salt"] = f"{DYNAMO_CACHE_SALT_PREFIX}{cache_salt}"
             return
 
 
@@ -745,6 +752,11 @@ def build_sampling_params(
     keep generation_config defaults for Gateway/backward-compatible traffic.
     Stop-token defaults from the model config are still applied later.
     """
+    if _engine_generate_payload(request) is not None:
+        return _build_engine_generate_sampling_params(
+            request, default_sampling_params, model_max_len
+        )
+
     if enable_rl and _is_token_in_request(request):
         # Use vLLM defaults without model generation_config overlays.
         sampling_params = SamplingParams()
@@ -3028,81 +3040,89 @@ class DecodeWorkerHandler(BaseWorkerHandler):
 
         mode = cast(DisaggregationMode, self.config.disaggregation_mode)
         is_decode_only = mode == DisaggregationMode.DECODE
-        has_mm_data = request.get("multi_modal_data") is not None
-        mixed_embeds: tuple[torch.Tensor, list[int], list[bool]] | None = None
-
-        if (
-            mode == DisaggregationMode.AGGREGATED
-            and self._custom_encoder is not None
-            and has_mm_data
-        ):
-            # A configured CustomEncoder owns the aggregated image path. Bypass
-            # the normal NIXL/HF request processor and assemble an EmbedsPrompt.
-            (
-                mixed_embeds,
-                multi_modal_data,
-                assemble_error,
-            ) = await self._assemble_custom_encoder_prompt(
-                request,
-                request_id,
-                context,
-            )
-            if assemble_error is not None:
-                yield assemble_error
-                return
-            mm_processor_kwargs = None
-            pre_rendered = None
+        is_engine_generate = _engine_generate_payload(request) is not None
+        if is_engine_generate:
+            prompt = _build_engine_generate_prompt(request)
+            embedding_sequence_length = None
+            error = None
         else:
-            try:
-                prepared_input = await self._multimodal_request_processor.prepare_input(
+            has_mm_data = request.get("multi_modal_data") is not None
+            mixed_embeds: tuple[torch.Tensor, list[int], list[bool]] | None = None
+
+            if (
+                mode == DisaggregationMode.AGGREGATED
+                and self._custom_encoder is not None
+                and has_mm_data
+            ):
+                # A configured CustomEncoder owns the aggregated image path. Bypass
+                # the normal NIXL/HF request processor and assemble an EmbedsPrompt.
+                (
+                    mixed_embeds,
+                    multi_modal_data,
+                    assemble_error,
+                ) = await self._assemble_custom_encoder_prompt(
                     request,
                     request_id,
                     context,
-                    mode,
                 )
-            except MissingMultimodalHandoffError as exc:
-                logger.error("Request %s: %s", request_id, exc)
-                yield {
-                    "finish_reason": f"error: {exc}",
-                    "index": 0,
-                    "token_ids": [],
-                }
-                return
-
-            request = prepared_input.request
-            multi_modal_data = prepared_input.multi_modal_data
-            mm_processor_kwargs = prepared_input.mm_processor_kwargs
-            pre_rendered = prepared_input.pre_rendered_prompt
-
-        # Build prompt from request. `prompt` is either a pre-rendered
-        # MultiModalInput dict (fast path) or a TokensPrompt/EmbedsPrompt from
-        # `_build_prompt_from_request`. Declare as Any so mypy accepts both
-        # branches without spelling out the full union.
-        prompt: Any
-        with _nvtx.annotate("mm_backend:build_prompt", color="yellow"):
-            if pre_rendered is not None:
-                # pre_rendered is a MultiModalInput dict with "type": "multimodal".
-                # The engine's InputProcessor.process_inputs() will see the "type"
-                # key and skip the HF processor entirely.
-                prompt = pre_rendered
-                embedding_sequence_length = None
-                error = None
-                logger.debug(
-                    "[mm-routing] Request %s: using pre-rendered MultiModalInput",
-                    request_id,
-                )
+                if assemble_error is not None:
+                    yield assemble_error
+                    return
+                mm_processor_kwargs = None
+                pre_rendered = None
             else:
-                (
-                    prompt,
-                    embedding_sequence_length,
-                    error,
-                ) = self._build_prompt_from_request(
-                    request,
-                    request_id,
-                    multi_modal_data,
-                    mm_processor_kwargs=mm_processor_kwargs,
-                    mixed_embeds=mixed_embeds,
-                )
+                try:
+                    prepared_input = (
+                        await self._multimodal_request_processor.prepare_input(
+                            request,
+                            request_id,
+                            context,
+                            mode,
+                        )
+                    )
+                except MissingMultimodalHandoffError as exc:
+                    logger.error("Request %s: %s", request_id, exc)
+                    yield {
+                        "finish_reason": f"error: {exc}",
+                        "index": 0,
+                        "token_ids": [],
+                    }
+                    return
+
+                request = prepared_input.request
+                multi_modal_data = prepared_input.multi_modal_data
+                mm_processor_kwargs = prepared_input.mm_processor_kwargs
+                pre_rendered = prepared_input.pre_rendered_prompt
+
+            # Build prompt from request. `prompt` is either a pre-rendered
+            # MultiModalInput dict (fast path) or a TokensPrompt/EmbedsPrompt from
+            # `_build_prompt_from_request`. Declare as Any so mypy accepts both
+            # branches without spelling out the full union.
+            prompt: Any
+            with _nvtx.annotate("mm_backend:build_prompt", color="yellow"):
+                if pre_rendered is not None:
+                    # pre_rendered is a MultiModalInput dict with "type": "multimodal".
+                    # The engine's InputProcessor.process_inputs() will see the "type"
+                    # key and skip the HF processor entirely.
+                    prompt = pre_rendered
+                    embedding_sequence_length = None
+                    error = None
+                    logger.debug(
+                        "[mm-routing] Request %s: using pre-rendered MultiModalInput",
+                        request_id,
+                    )
+                else:
+                    (
+                        prompt,
+                        embedding_sequence_length,
+                        error,
+                    ) = self._build_prompt_from_request(
+                        request,
+                        request_id,
+                        multi_modal_data,
+                        mm_processor_kwargs=mm_processor_kwargs,
+                        mixed_embeds=mixed_embeds,
+                    )
         if error is not None:
             yield error
             return
@@ -3134,7 +3154,13 @@ class DecodeWorkerHandler(BaseWorkerHandler):
         if kv_params is not None:
             if sampling_params.extra_args is None:
                 sampling_params.extra_args = {}
-            sampling_params.extra_args["kv_transfer_params"] = kv_params
+            sampling_params.extra_args[
+                "kv_transfer_params"
+            ] = _merge_kv_transfer_params(
+                sampling_params.extra_args.get("kv_transfer_params"),
+                kv_params,
+                reject_collisions=is_engine_generate,
+            )
             logger.debug(
                 f"Using disaggregated params from prefill for request {request_id}"
             )
@@ -3155,7 +3181,7 @@ class DecodeWorkerHandler(BaseWorkerHandler):
             )
         routing = request.get("routing") or {}
         dp_rank = self._to_local_dp_rank(routing.get("dp_rank"))
-        priority = -int(routing.get("priority", 0))
+        priority = _engine_generate_priority(request)
 
         trace_headers = context.trace_headers()
         reasoning_ended, reasoning_parser_kwargs = _request_reasoning_metadata(request)
@@ -3425,29 +3451,34 @@ class PrefillWorkerHandler(BaseWorkerHandler):
 
     async def _generate_token_mode(self, request, context, request_id):
         """Generate prefill using internal protocol format (token-in-token-out)."""
-        prepared_input = await self._multimodal_request_processor.prepare_input(
-            request,
-            request_id,
-            context,
-            DisaggregationMode.PREFILL,
-        )
-        request = prepared_input.request
-        multi_modal_data = prepared_input.multi_modal_data
-        mm_processor_kwargs = prepared_input.mm_processor_kwargs
+        is_engine_generate = _engine_generate_payload(request) is not None
+        if is_engine_generate:
+            prompt = _build_engine_generate_prompt(request)
+            embedding_sequence_length = None
+            multi_modal_data = None
+            mm_processor_kwargs = None
+        else:
+            prepared_input = await self._multimodal_request_processor.prepare_input(
+                request,
+                request_id,
+                context,
+                DisaggregationMode.PREFILL,
+            )
+            request = prepared_input.request
+            multi_modal_data = prepared_input.multi_modal_data
+            mm_processor_kwargs = prepared_input.mm_processor_kwargs
 
-        # Build prompt from request (handles both prompt_embeds and token_ids)
-        prompt, embedding_sequence_length, error = self._build_prompt_from_request(
-            request,
-            request_id,
-            multi_modal_data,
-            log_prefix="Prefill ",
-            mm_processor_kwargs=mm_processor_kwargs,
-        )
-        if error is not None:
-            # Prefill errors need disaggregated_params field
-            error["disaggregated_params"] = None
-            yield error
-            return
+            prompt, embedding_sequence_length, error = self._build_prompt_from_request(
+                request,
+                request_id,
+                multi_modal_data,
+                log_prefix="Prefill ",
+                mm_processor_kwargs=mm_processor_kwargs,
+            )
+            if error is not None:
+                error["disaggregated_params"] = None
+                yield error
+                return
 
         _apply_nvext_cache_salt(request, prompt)
 
@@ -3466,9 +3497,11 @@ class PrefillWorkerHandler(BaseWorkerHandler):
         )
         if sampling_params.extra_args is None:
             sampling_params.extra_args = {}
-        sampling_params.extra_args[
-            "kv_transfer_params"
-        ] = kv_protocol.prefill_request_kv_transfer_params()
+        sampling_params.extra_args["kv_transfer_params"] = _merge_kv_transfer_params(
+            sampling_params.extra_args.get("kv_transfer_params"),
+            kv_protocol.prefill_request_kv_transfer_params(),
+            reject_collisions=is_engine_generate,
+        )
         # Override for prefill: only generate 1 token
         sampling_params.max_tokens = 1
         sampling_params.min_tokens = 1
@@ -3488,7 +3521,7 @@ class PrefillWorkerHandler(BaseWorkerHandler):
 
         routing = request.get("routing") or {}
         dp_rank = self._to_local_dp_rank(routing.get("dp_rank"))
-        priority = -int(routing.get("priority", 0))
+        priority = _engine_generate_priority(request)
 
         trace_headers = context.trace_headers()
         reasoning_ended, reasoning_parser_kwargs = _request_reasoning_metadata(request)
@@ -3523,7 +3556,9 @@ class PrefillWorkerHandler(BaseWorkerHandler):
                 # For prefill worker, only one res will be generated,
                 # so we can always build embedding params here without conditionals
                 embedding_params = (
-                    self._multimodal_request_processor.build_prefill_handoff(
+                    None
+                    if is_engine_generate
+                    else self._multimodal_request_processor.build_prefill_handoff(
                         multi_modal_data=multi_modal_data,
                         prompt_token_ids=list(res.prompt_token_ids or []),
                         mm_processor_kwargs=mm_processor_kwargs,

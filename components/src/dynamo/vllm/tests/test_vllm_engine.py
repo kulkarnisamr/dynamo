@@ -26,6 +26,7 @@ from typing import cast
 import pytest
 import pytest_asyncio
 
+from dynamo.vllm.engine_generate import EXACT_MM_ROUTING_CAPABILITY, GENERATE_CAPABILITY
 from tests.utils.gpu_args import build_gpu_mem_args
 
 MODEL_ID = "Qwen/Qwen3-0.6B"
@@ -137,13 +138,18 @@ async def _check_start_populates_registration_metadata(started_engine):
     """``start`` must surface non-None values for the fields the Rust
     registration path reads — if any of them come back None, the model
     appears in /v1/models but fails to actually serve."""
-    _engine, cfg = started_engine
+    engine, cfg = started_engine
     assert cfg.llm is not None
     assert cfg.llm.context_length and cfg.llm.context_length > 0
     assert cfg.llm.kv_cache_block_size and cfg.llm.kv_cache_block_size > 0
     assert cfg.llm.total_kv_blocks and cfg.llm.total_kv_blocks > 0
     assert cfg.llm.max_num_seqs and cfg.llm.max_num_seqs > 0
     assert cfg.llm.max_num_batched_tokens and cfg.llm.max_num_batched_tokens > 0
+    assert cfg.runtime_data is not None
+    assert cfg.runtime_data[GENERATE_CAPABILITY] is True
+    assert (EXACT_MM_ROUTING_CAPABILITY in cfg.runtime_data) is (
+        engine._image_token_id is not None
+    )
 
 
 async def _check_generate_streams_chunks_with_coherent_final_usage(started_engine):
