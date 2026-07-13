@@ -78,9 +78,8 @@ func (d *DCDDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 
 // RegisterWithManager registers the DCD defaulting webhook with the manager.
 func (d *DCDDefaulter) RegisterWithManager(mgr manager.Manager) error {
-	defaulter := internalwebhook.NewLeaseAwareDefaulter(d, internalwebhook.GetExcludedNamespaces())
 	webhook := admission.
-		WithCustomDefaulter(mgr.GetScheme(), &nvidiacomv1beta1.DynamoComponentDeployment{}, defaulter).
+		WithCustomDefaulter(mgr.GetScheme(), &nvidiacomv1beta1.DynamoComponentDeployment{}, d).
 		WithRecoverPanic(true)
 	mgr.GetWebhookServer().Register(dcdDefaultingWebhookPath, webhook)
 	return nil

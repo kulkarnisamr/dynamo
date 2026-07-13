@@ -110,9 +110,8 @@ func (d *DGDRDefaulter) defaultImageFor() string {
 
 // RegisterWithManager registers the DGDR defaulting webhook with the manager.
 func (d *DGDRDefaulter) RegisterWithManager(mgr manager.Manager) error {
-	defaulter := internalwebhook.NewLeaseAwareDefaulter(d, internalwebhook.GetExcludedNamespaces())
 	webhook := admission.
-		WithCustomDefaulter(mgr.GetScheme(), &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}, defaulter).
+		WithCustomDefaulter(mgr.GetScheme(), &nvidiacomv1beta1.DynamoGraphDeploymentRequest{}, d).
 		WithRecoverPanic(true)
 	mgr.GetWebhookServer().Register(dgdrDefaultingWebhookPath, webhook)
 	return nil
