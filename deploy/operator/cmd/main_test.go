@@ -17,8 +17,21 @@ func TestRegisterWebhookHandlersRejectsNamespacedMode(t *testing.T) {
 		Namespace: configv1alpha1.NamespaceConfiguration{Restricted: "tenant-a"},
 	}
 
-	err := registerWebhookHandlers(nil, operatorConfig, "test")
+	err := registerWebhookHandlers(nil, operatorConfig, "test", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "cluster-wide operator") {
 		t.Fatalf("expected cluster-wide ownership error, got %v", err)
+	}
+}
+
+func TestOperatorServiceAccountPrincipal(t *testing.T) {
+	t.Setenv("POD_SERVICE_ACCOUNT", "dev-operator")
+	t.Setenv("POD_NAMESPACE", "tenant-a")
+	if got := operatorServiceAccountPrincipal(); got != "system:serviceaccount:tenant-a:dev-operator" {
+		t.Fatalf("operatorServiceAccountPrincipal() = %q", got)
+	}
+
+	t.Setenv("POD_NAMESPACE", "")
+	if got := operatorServiceAccountPrincipal(); got != "" {
+		t.Fatalf("operatorServiceAccountPrincipal() without namespace = %q", got)
 	}
 }

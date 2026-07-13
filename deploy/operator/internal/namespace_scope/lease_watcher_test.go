@@ -144,7 +144,8 @@ func TestLeaseWatcher_AdmissionGateSnapshot(t *testing.T) {
 			Name:      LeaseName,
 			Namespace: "test-ns",
 			Annotations: map[string]string{
-				features.LeaseAnnotation: `{"grove":true}`,
+				features.LeaseAnnotation:    `{"grove":true}`,
+				OperatorPrincipalAnnotation: "system:serviceaccount:test-ns:dev-operator",
 			},
 		},
 		Spec: coordinationv1.LeaseSpec{
@@ -157,6 +158,9 @@ func TestLeaseWatcher_AdmissionGateSnapshot(t *testing.T) {
 	if got, found := lw.AdmissionGateSnapshot("test-ns"); !found || got != `{"grove":true}` {
 		t.Fatalf("AdmissionGateSnapshot() = %q, %v", got, found)
 	}
+	if got, found := lw.OperatorPrincipal("test-ns"); !found || got != "system:serviceaccount:test-ns:dev-operator" {
+		t.Fatalf("OperatorPrincipal() = %q, %v", got, found)
+	}
 
 	lease = lease.DeepCopy()
 	lease.Annotations[features.LeaseAnnotation] = `{"grove":false}`
@@ -166,6 +170,16 @@ func TestLeaseWatcher_AdmissionGateSnapshot(t *testing.T) {
 	}
 	if _, found := lw.AdmissionGateSnapshot("unclaimed"); found {
 		t.Fatal("unclaimed namespace must not return a snapshot")
+	}
+	if _, found := lw.OperatorPrincipal("unclaimed"); found {
+		t.Fatal("unclaimed namespace must not return an operator principal")
+	}
+
+	lease = lease.DeepCopy()
+	lease.Spec.RenewTime = &metav1.MicroTime{Time: time.Now().Add(-time.Minute)}
+	lw.handleLeaseUpdate(lease)
+	if _, found := lw.OperatorPrincipal("test-ns"); found {
+		t.Fatal("expired lease must not return an operator principal")
 	}
 }
 

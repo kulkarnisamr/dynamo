@@ -112,10 +112,11 @@ func TestFeatureAwareValidator(t *testing.T) {
 
 func TestCanModifyDGDReplicas(t *testing.T) {
 	tests := []struct {
-		name          string
-		principal     string
-		username      string
-		expectAllowed bool
+		name               string
+		principal          string
+		namespacePrincipal string
+		username           string
+		expectAllowed      bool
 	}{
 		{
 			name:          "operator SA with standard Helm release (dynamo-platform)",
@@ -134,6 +135,13 @@ func TestCanModifyDGDReplicas(t *testing.T) {
 			principal:     "system:serviceaccount:custom-ns:my-release-controller-manager",
 			username:      "system:serviceaccount:custom-ns:my-release-controller-manager",
 			expectAllowed: true,
+		},
+		{
+			name:               "active namespaced operator SA",
+			principal:          "system:serviceaccount:dynamo-system:dynamo-operator-controller-manager",
+			namespacePrincipal: "system:serviceaccount:tenant-a:dev-operator-controller-manager",
+			username:           "system:serviceaccount:tenant-a:dev-operator-controller-manager",
+			expectAllowed:      true,
 		},
 		{
 			name:          "operator SA wrong namespace is rejected",
@@ -188,7 +196,7 @@ func TestCanModifyDGDReplicas(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			userInfo := authenticationv1.UserInfo{Username: tt.username}
-			got := CanModifyDGDReplicas(tt.principal, userInfo)
+			got := CanModifyDGDReplicas([]string{tt.principal, tt.namespacePrincipal}, userInfo)
 			if got != tt.expectAllowed {
 				t.Errorf("CanModifyDGDReplicas() = %v, want %v", got, tt.expectAllowed)
 			}

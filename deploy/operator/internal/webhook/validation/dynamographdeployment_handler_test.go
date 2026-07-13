@@ -38,7 +38,7 @@ import (
 
 func TestDynamoGraphDeploymentV1Alpha1Handler(t *testing.T) {
 	handler := &dynamoGraphDeploymentV1Alpha1Handler{
-		handler: NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), ""),
+		handler: NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "", nil),
 	}
 
 	t.Run("create", func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestDynamoGraphDeploymentV1Alpha1Handler(t *testing.T) {
 }
 
 func TestDynamoGraphDeploymentHandlerValidateCreate(t *testing.T) {
-	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "system:serviceaccount:dynamo:dynamo-operator")
+	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "system:serviceaccount:dynamo:dynamo-operator", nil)
 	dgd := newBetaDGDForValidation()
 
 	warnings, err := handler.ValidateCreate(dgdAdmissionContext(admissionv1.Create, nvidiacomv1beta1.DynamoGraphDeploymentGVK), dgd)
@@ -119,7 +119,7 @@ func TestDynamoGraphDeploymentHandlerValidateCreate(t *testing.T) {
 }
 
 func TestDynamoGraphDeploymentHandlerValidateUpdate(t *testing.T) {
-	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "system:serviceaccount:dynamo:dynamo-operator")
+	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "system:serviceaccount:dynamo:dynamo-operator", nil)
 	ctx := dgdAdmissionContext(admissionv1.Update, nvidiacomv1beta1.DynamoGraphDeploymentGVK)
 
 	t.Run("valid", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestDynamoGraphDeploymentHandlerValidateUpdate(t *testing.T) {
 }
 
 func TestDynamoGraphDeploymentHandlerValidateDelete(t *testing.T) {
-	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "")
+	handler := NewDynamoGraphDeploymentHandler(newGroveTopologyTestManager(t), "", nil)
 	ctx := dgdAdmissionContext(admissionv1.Delete, nvidiacomv1beta1.DynamoGraphDeploymentGVK)
 
 	warnings, err := handler.ValidateDelete(ctx, newBetaDGDForValidation())
@@ -216,7 +216,7 @@ func TestDynamoGraphDeploymentHandlerRegisterWithManager(t *testing.T) {
 
 	server := ctrlwebhook.NewServer(ctrlwebhook.Options{})
 	mgr := &fakeManager{scheme: scheme, webhookServer: server}
-	handler := NewDynamoGraphDeploymentHandler(mgr, "")
+	handler := NewDynamoGraphDeploymentHandler(mgr, "", nil)
 	if err := handler.RegisterWithManager(mgr); err != nil {
 		t.Fatalf("RegisterWithManager() error = %v", err)
 	}

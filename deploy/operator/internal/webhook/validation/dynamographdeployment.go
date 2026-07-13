@@ -62,8 +62,8 @@ func NewDynamoGraphDeploymentValidator(
 // API values and derived traversal state remain explicit validator arguments.
 type dynamoGraphDeploymentValidation struct {
 	sharedValidation
-	userInfo          *authenticationv1.UserInfo
-	operatorPrincipal string
+	userInfo           *authenticationv1.UserInfo
+	operatorPrincipals []string
 }
 
 type dynamoGraphDeploymentSpecValidationOptions struct {
@@ -101,12 +101,12 @@ func (v *DynamoGraphDeploymentValidator) ValidateUpdate(
 	oldDGD *nvidiacomv1beta1.DynamoGraphDeployment,
 	newDGD *nvidiacomv1beta1.DynamoGraphDeployment,
 	userInfo *authenticationv1.UserInfo,
-	operatorPrincipal string,
+	operatorPrincipals []string,
 ) (admission.Warnings, error) {
 	validation := &dynamoGraphDeploymentValidation{
-		sharedValidation:  sharedValidation{ctx: ctx, mgr: v.mgr, gates: v.gates},
-		userInfo:          userInfo,
-		operatorPrincipal: operatorPrincipal,
+		sharedValidation:   sharedValidation{ctx: ctx, mgr: v.mgr, gates: v.gates},
+		userInfo:           userInfo,
+		operatorPrincipals: operatorPrincipals,
 	}
 
 	allErrs := validation.validateDynamoGraphDeploymentUpdate(newDGD, oldDGD)
@@ -531,7 +531,7 @@ func (v *dynamoGraphDeploymentValidation) validateDynamoGraphDeploymentSpecUpdat
 		allErrs = append(allErrs, field.Forbidden(fldPath.Child("components"), detail))
 	}
 
-	canModifyReplicas := v.userInfo != nil && internalwebhook.CanModifyDGDReplicas(v.operatorPrincipal, *v.userInfo)
+	canModifyReplicas := v.userInfo != nil && internalwebhook.CanModifyDGDReplicas(v.operatorPrincipals, *v.userInfo)
 	componentsPath := fldPath.Child("components")
 	for i := range newSpec.Components {
 		newComponent := &newSpec.Components[i]

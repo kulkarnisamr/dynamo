@@ -329,8 +329,7 @@ func main() {
 	}
 
 	// Leases transfer reconciliation ownership. Cluster-wide admission consumes
-	// their feature snapshots but never delegates validation.
-	var leaseManager *namespace_scope.LeaseManager
+	// their feature snapshots and operator identities but never delegates validation.
 	var leaseWatcher *namespace_scope.LeaseWatcher
 	if restrictedNamespace == "" {
 		setupLog.Info("Setting up namespace reconciliation lease watcher")
@@ -503,39 +502,30 @@ func main() {
 			"envVar", features.GMSSnapshotEnvVar,
 		)
 	}
+	operatorPrincipal := operatorServiceAccountPrincipal()
+	if operatorPrincipal == "" {
+		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
+	} else {
+		setupLog.Info("Detected operator principal from downward API", "principal", operatorPrincipal)
+	}
 	if restrictedNamespace != "" {
-		leaseManager, err = namespace_scope.NewLeaseManager(
+		leaseManager, err := namespace_scope.NewLeaseManager(
 			mgr.GetConfig(),
 			restrictedNamespace,
 			operatorVersion,
 			operatorCfg.Namespace.Scope.LeaseDuration.Duration,
 			operatorCfg.Namespace.Scope.LeaseRenewInterval.Duration,
 			admissionGates,
+			operatorPrincipal,
 		)
 		if err != nil {
 			setupLog.Error(err, "unable to create namespace reconciliation lease manager")
 			os.Exit(1)
 		}
-		if err = leaseManager.Start(mainCtx); err != nil {
-			setupLog.Error(err, "unable to start namespace reconciliation lease manager")
+		if err = mgr.Add(leaseManager); err != nil {
+			setupLog.Error(err, "unable to register namespace reconciliation lease manager")
 			os.Exit(1)
 		}
-		go func() {
-			select {
-			case err := <-leaseManager.Errors():
-				setupLog.Error(err, "FATAL: namespace reconciliation lease renewal failed")
-				os.Exit(1)
-			case <-mainCtx.Done():
-				return
-			}
-		}()
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := leaseManager.Stop(shutdownCtx); err != nil {
-				setupLog.Error(err, "failed to release namespace reconciliation lease")
-			}
-		}()
 	} else {
 		internalwebhook.SetFeatureResolver(features.NewResolver(admissionGates, leaseWatcher.AdmissionGateSnapshot))
 	}
@@ -648,7 +638,7 @@ func main() {
 	}
 
 	if restrictedNamespace == "" {
-		if err := registerWebhookHandlers(mgr, operatorCfg, operatorVersion); err != nil {
+		if err := registerWebhookHandlers(mgr, operatorCfg, operatorVersion, operatorPrincipal, leaseWatcher); err != nil {
 			setupLog.Error(err, "failed to register webhooks")
 			os.Exit(1)
 		}
@@ -818,21 +808,24 @@ func registerControllers(
 	return nil
 }
 
+func operatorServiceAccountPrincipal() string {
+	serviceAccount := os.Getenv("POD_SERVICE_ACCOUNT")
+	namespace := os.Getenv("POD_NAMESPACE")
+	if serviceAccount == "" || namespace == "" {
+		return ""
+	}
+	return fmt.Sprintf("system:serviceaccount:%s:%s", namespace, serviceAccount)
+}
+
 func registerWebhookHandlers(
 	mgr ctrl.Manager,
 	operatorCfg *configv1alpha1.OperatorConfiguration,
 	operatorVersion string,
+	operatorPrincipal string,
+	namespaceOperatorPrincipals webhookvalidation.NamespaceOperatorPrincipalResolver,
 ) error {
 	if operatorCfg.Namespace.Restricted != "" {
 		return fmt.Errorf("defaulting, mutation, and conversion webhooks can only be registered by the cluster-wide operator")
-	}
-
-	var operatorPrincipal string
-	if sa, ns := os.Getenv("POD_SERVICE_ACCOUNT"), os.Getenv("POD_NAMESPACE"); sa != "" && ns != "" {
-		operatorPrincipal = fmt.Sprintf("system:serviceaccount:%s:%s", ns, sa)
-		setupLog.Info("Detected operator principal from downward API", "principal", operatorPrincipal)
-	} else {
-		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
 	}
 
 	setupLog.Info("Registering validation webhooks")
@@ -842,7 +835,7 @@ func registerWebhookHandlers(
 		return fmt.Errorf("unable to register DynamoComponentDeployment webhook: %w", err)
 	}
 
-	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal)
+	dgdHandler := webhookvalidation.NewDynamoGraphDeploymentHandler(mgr, operatorPrincipal, namespaceOperatorPrincipals)
 	if err := dgdHandler.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register DynamoGraphDeployment webhook: %w", err)
 	}

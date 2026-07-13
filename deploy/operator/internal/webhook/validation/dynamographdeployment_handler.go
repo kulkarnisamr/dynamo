@@ -43,11 +43,18 @@ const (
 	dynamoGraphDeploymentV1Beta1WebhookPath  = "/validate/nvidia.com/v1beta1/dynamographdeployments"
 )
 
+// NamespaceOperatorPrincipalResolver resolves the active namespaced operator's
+// Kubernetes username for a namespace.
+type NamespaceOperatorPrincipalResolver interface {
+	OperatorPrincipal(namespace string) (string, bool)
+}
+
 // DynamoGraphDeploymentHandler is a handler for validating DynamoGraphDeployment resources.
 // It is a thin wrapper around DynamoGraphDeploymentValidator.
 type DynamoGraphDeploymentHandler struct {
-	mgr               manager.Manager
-	operatorPrincipal string
+	mgr                         manager.Manager
+	operatorPrincipal           string
+	namespaceOperatorPrincipals NamespaceOperatorPrincipalResolver
 }
 
 // dynamoGraphDeploymentV1Alpha1Handler keeps the previous endpoint available
@@ -59,12 +66,16 @@ type dynamoGraphDeploymentV1Alpha1Handler struct {
 
 // NewDynamoGraphDeploymentHandler creates a new handler for DynamoGraphDeployment Webhook.
 // mgr must not be nil.
-// operatorPrincipal is the full Kubernetes SA username of the operator, used to authorize
-// replica changes on scaling-adapter-enabled components (#7656).
-func NewDynamoGraphDeploymentHandler(mgr manager.Manager, operatorPrincipal string) *DynamoGraphDeploymentHandler {
+// operatorPrincipal is the full Kubernetes SA username of the cluster-wide operator.
+func NewDynamoGraphDeploymentHandler(
+	mgr manager.Manager,
+	operatorPrincipal string,
+	namespaceOperatorPrincipals NamespaceOperatorPrincipalResolver,
+) *DynamoGraphDeploymentHandler {
 	return &DynamoGraphDeploymentHandler{
-		mgr:               mgr,
-		operatorPrincipal: operatorPrincipal,
+		mgr:                         mgr,
+		operatorPrincipal:           operatorPrincipal,
+		namespaceOperatorPrincipals: namespaceOperatorPrincipals,
 	}
 }
 
@@ -147,8 +158,15 @@ func (h *DynamoGraphDeploymentHandler) validateUpdate(
 		userInfo = &req.UserInfo
 	}
 
+	operatorPrincipals := []string{h.operatorPrincipal}
+	if h.namespaceOperatorPrincipals != nil {
+		if principal, found := h.namespaceOperatorPrincipals.OperatorPrincipal(newDeployment.Namespace); found {
+			operatorPrincipals = append(operatorPrincipals, principal)
+		}
+	}
+
 	// Validate stateful rules (immutability + replicas protection)
-	updateWarnings, err := validator.ValidateUpdate(ctx, oldDeployment, newDeployment, userInfo, h.operatorPrincipal)
+	updateWarnings, err := validator.ValidateUpdate(ctx, oldDeployment, newDeployment, userInfo, operatorPrincipals)
 	if err != nil {
 		username := "<unknown>"
 		if userInfo != nil {

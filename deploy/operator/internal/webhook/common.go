@@ -113,28 +113,28 @@ func (v *FeatureAwareValidator) contextFor(
 // CanModifyDGDReplicas checks if the request comes from a service account authorized
 // to modify DGD replicas when scaling adapter is enabled.
 //
-// operatorPrincipal is the full Kubernetes username
-// (system:serviceaccount:<namespace>:<name>) of the operator's own service account,
-// auto-detected at startup via the Kubernetes Downward API. It may be empty if
-// the Downward API env vars were not set.
+// operatorPrincipals are full Kubernetes usernames
+// (system:serviceaccount:<namespace>:<name>) of authorized operator service accounts.
 //
 // Authorization is checked in two ways:
-//  1. Exact match against operatorPrincipal.
+//  1. Exact match against an operator principal.
 //  2. Name-only match for the planner SA, which the operator creates in every DGD
 //     namespace with a well-known constant name. Because the namespace is only known
 //     at runtime, it cannot be enumerated statically.
-func CanModifyDGDReplicas(operatorPrincipal string, userInfo authenticationv1.UserInfo) bool {
+func CanModifyDGDReplicas(operatorPrincipals []string, userInfo authenticationv1.UserInfo) bool {
 	username := userInfo.Username
 
 	if !strings.HasPrefix(username, "system:serviceaccount:") {
 		return false
 	}
 
-	if operatorPrincipal != "" && username == operatorPrincipal {
-		webhookCommonLog.V(1).Info("allowing DGD replicas modification",
-			"username", username,
-			"matchType", "operatorPrincipal")
-		return true
+	for _, operatorPrincipal := range operatorPrincipals {
+		if operatorPrincipal != "" && username == operatorPrincipal {
+			webhookCommonLog.V(1).Info("allowing DGD replicas modification",
+				"username", username,
+				"matchType", "operatorPrincipal")
+			return true
+		}
 	}
 
 	parts := strings.Split(username, ":")

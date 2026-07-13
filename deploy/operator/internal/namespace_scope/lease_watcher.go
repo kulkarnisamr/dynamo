@@ -79,6 +79,17 @@ func (lw *LeaseWatcher) AdmissionGateSnapshot(namespace string) (string, bool) {
 	return snapshot, found
 }
 
+// OperatorPrincipal returns the Kubernetes username published by the active
+// namespaced operator for the namespace.
+func (lw *LeaseWatcher) OperatorPrincipal(namespace string) (string, bool) {
+	lease, exists := lw.activeLease(namespace)
+	if !exists || lease.Annotations == nil {
+		return "", false
+	}
+	principal, found := lease.Annotations[OperatorPrincipalAnnotation]
+	return principal, found && principal != ""
+}
+
 func (lw *LeaseWatcher) activeLease(namespace string) (*coordinationv1.Lease, bool) {
 	value, exists := lw.excludedNamespaces.Load(namespace)
 	if !exists {

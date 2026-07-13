@@ -57,6 +57,13 @@ const (
 
 const sglangBackendFramework = "sglang"
 
+type staticNamespaceOperatorPrincipals map[string]string
+
+func (p staticNamespaceOperatorPrincipals) OperatorPrincipal(namespace string) (string, bool) {
+	principal, found := p[namespace]
+	return principal, found
+}
+
 func TestDynamoGraphDeploymentValidator_Validate(t *testing.T) {
 	requestValidators := requestValidatorsFromCRD(t, "nvidia.com_dynamographdeployments.yaml")
 	defaultManager := newGroveTopologyTestManager(t, newTestClusterTopology())
@@ -67,14 +74,15 @@ func TestDynamoGraphDeploymentValidator_Validate(t *testing.T) {
 	tooLongComponentName := boundaryComponentName + "x"
 
 	tests := []struct {
-		name          string
-		deployment    runtime.Object
-		oldDeployment runtime.Object
-		mutateRequest func(*testing.T, map[string]any) // mutates the source-version request map
-		manager       ctrl.Manager                     // supplies webhook dependencies
-		groveDisabled bool                             // disables the configured Grove pathway
-		userInfo      *authenticationv1.UserInfo       // supplies the admission request identity
-		operator      string                           // sets the configured operator principal
+		name                        string
+		deployment                  runtime.Object
+		oldDeployment               runtime.Object
+		mutateRequest               func(*testing.T, map[string]any) // mutates the source-version request map
+		manager                     ctrl.Manager                     // supplies webhook dependencies
+		groveDisabled               bool                             // disables the configured Grove pathway
+		userInfo                    *authenticationv1.UserInfo       // supplies the admission request identity
+		operator                    string                           // sets the configured operator principal
+		namespaceOperatorPrincipals NamespaceOperatorPrincipalResolver
 
 		wantSchemaErr   string
 		wantCELErr      string
@@ -1524,6 +1532,24 @@ func TestDynamoGraphDeploymentValidator_Validate(t *testing.T) {
 			},
 			operator: dgdAdmissionOperator,
 		},
+		{
+			name: "active namespaced operator can change scaling-adapter-owned replicas",
+			oldDeployment: betaDGDWithWorker(func(worker *nvidiacomv1beta1.DynamoComponentDeploymentSharedSpec) {
+				worker.ScalingAdapter = &nvidiacomv1beta1.ScalingAdapter{}
+				worker.Replicas = k8sptr.To(int32(2))
+			}),
+			deployment: betaDGDWithWorker(func(worker *nvidiacomv1beta1.DynamoComponentDeploymentSharedSpec) {
+				worker.ScalingAdapter = &nvidiacomv1beta1.ScalingAdapter{}
+				worker.Replicas = k8sptr.To(int32(3))
+			}),
+			userInfo: &authenticationv1.UserInfo{
+				Username: "system:serviceaccount:default:dev-operator",
+			},
+			operator: dgdAdmissionOperator,
+			namespaceOperatorPrincipals: staticNamespaceOperatorPrincipals{
+				"default": "system:serviceaccount:default:dev-operator",
+			},
+		},
 
 		// Backend and restart updates.
 		{
@@ -1687,7 +1713,7 @@ func TestDynamoGraphDeploymentValidator_Validate(t *testing.T) {
 			if manager == nil {
 				manager = defaultManager
 			}
-			handler := NewDynamoGraphDeploymentHandler(manager, tt.operator)
+			handler := NewDynamoGraphDeploymentHandler(manager, tt.operator, tt.namespaceOperatorPrincipals)
 			ctx := features.WithGates(dgdAdmissionContextWithUserInfo(
 				dgdAdmissionOperation(tt.oldDeployment),
 				nvidiacomv1beta1.DynamoGraphDeploymentGVK,
