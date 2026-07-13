@@ -77,7 +77,7 @@ func (h *DynamoCheckpointHandler) ValidateDelete(ctx context.Context, obj runtim
 }
 
 func (h *DynamoCheckpointHandler) RegisterWithManager(mgr manager.Manager) error {
-	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.ValidationResolver())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.FeatureResolver())
 	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoCheckpoint)
 	webhook := admission.
 		WithCustomValidator(mgr.GetScheme(), &nvidiacomv1alpha1.DynamoCheckpoint{}, observedValidator).

@@ -119,7 +119,7 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateDelete(ctx context.Context
 
 // RegisterWithManager registers the webhook with the manager.
 func (h *DynamoGraphDeploymentRequestHandler) RegisterWithManager(mgr manager.Manager) error {
-	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.ValidationResolver())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.FeatureResolver())
 
 	// Wrap with metrics collection
 	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoGraphDeploymentRequest)

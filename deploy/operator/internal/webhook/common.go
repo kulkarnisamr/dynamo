@@ -32,17 +32,17 @@ import (
 
 var webhookCommonLog = logf.Log.WithName("webhook-common")
 
-var validationResolver features.Resolver
+var featureResolver features.Resolver
 
-// SetValidationResolver sets the feature resolver consulted by validating webhooks.
+// SetFeatureResolver sets the namespace-aware resolver consulted by admission webhooks.
 // It must be called before webhook handlers are registered.
-func SetValidationResolver(resolver features.Resolver) {
-	validationResolver = resolver
+func SetFeatureResolver(resolver features.Resolver) {
+	featureResolver = resolver
 }
 
-// ValidationResolver returns the feature resolver used by validating webhooks.
-func ValidationResolver() features.Resolver {
-	return validationResolver
+// FeatureResolver returns the feature resolver used by admission webhooks.
+func FeatureResolver() features.Resolver {
+	return featureResolver
 }
 
 // FeatureAwareValidator supplies the effective namespace gates to a validator.

@@ -13,6 +13,7 @@ import (
 	configv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/config/v1alpha1"
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	snapshotprotocol "github.com/ai-dynamo/dynamo/deploy/snapshot/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,7 +57,6 @@ func TestPodCheckpointRestoreMutatorHandle(t *testing.T) {
 			Build(),
 		&configv1alpha1.OperatorConfiguration{
 			Checkpoint: configv1alpha1.CheckpointConfiguration{
-				Enabled: true,
 				Storage: configv1alpha1.CheckpointStorageConfiguration{
 					Type: snapshotprotocol.StorageTypePVC,
 					PVC: configv1alpha1.CheckpointPVCConfig{
@@ -66,6 +66,12 @@ func TestPodCheckpointRestoreMutatorHandle(t *testing.T) {
 				},
 			},
 		},
+		features.NewResolver(features.Gates{Checkpoint: false}, func(namespace string) (string, bool) {
+			if namespace == "default" {
+				return `{"checkpoint":true}`, true
+			}
+			return "", false
+		}),
 	)
 	mutator.scheme = scheme
 
@@ -111,6 +117,30 @@ func TestPodCheckpointRestoreMutatorHandle(t *testing.T) {
 		}}
 
 		resp := mutator.Handle(context.Background(), req)
+		require.True(t, resp.Allowed)
+		assert.Empty(t, resp.Patches)
+	})
+
+	t.Run("namespace gate disables globally enabled checkpoint mutation", func(t *testing.T) {
+		disabledMutator := NewPodCheckpointRestoreMutator(
+			mutator.client,
+			&configv1alpha1.OperatorConfiguration{Checkpoint: configv1alpha1.CheckpointConfiguration{Enabled: true}},
+			features.NewResolver(features.Gates{Checkpoint: true}, func(namespace string) (string, bool) {
+				if namespace == "default" {
+					return `{"checkpoint":false}`, true
+				}
+				return "", false
+			}),
+		)
+		disabledMutator.scheme = scheme
+		pod := checkpointCandidatePod("worker-checkpoint")
+		req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Create,
+			Namespace: "default",
+			Object:    runtime.RawExtension{Raw: mustMarshalPod(t, pod)},
+		}}
+
+		resp := disabledMutator.Handle(context.Background(), req)
 		require.True(t, resp.Allowed)
 		assert.Empty(t, resp.Patches)
 	})

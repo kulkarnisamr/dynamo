@@ -218,7 +218,7 @@ func (h *DynamoGraphDeploymentHandler) registerWithManager(
 	path string,
 	validator admission.CustomValidator,
 ) {
-	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.ValidationResolver())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.FeatureResolver())
 
 	// Wrap with metrics collection
 	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoGraphDeployment)

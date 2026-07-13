@@ -86,7 +86,7 @@ helm install tenant-dynamo . \
 `namespaceRestriction.targetNamespace` may be set when the reconciliation target differs
 from the Helm release namespace. The namespaced operator does not create or serve webhooks.
 It publishes its complete effective feature-gate snapshot in the reconciliation Lease, and
-the cluster-wide validator applies that snapshot to requests in the namespace. The
+cluster-wide admission applies that snapshot to requests in the namespace. The
 cluster-wide operator must support Lease-based feature gates.
 
 Every released namespaced operator requires a cluster-wide operator of the same or a newer
@@ -111,8 +111,13 @@ and timing values remain compatible.
   `upgradeCRD=true` is rejected.
 - **Global webhook scope**: setting `webhook.namespaceSelector` causes installation to fail.
 - **Reconciliation leases**: cluster-wide reconcilers skip namespaces with an active
-  namespaced-operator Lease. Global validation applies the feature gates from that Lease;
-  CRD schema/CEL, defaulting, mutation, and conversion continue to apply.
+  namespaced-operator Lease. Global validation and feature-dependent mutation apply the
+  feature gates from that Lease; CRD schema/CEL, defaulting, and conversion continue to
+  apply.
+
+Checkpoint restore mutation uses the namespace's `checkpoint` gate. Its storage and
+seccomp settings remain cluster-wide, so namespaced checkpoint tests must use compatible
+cluster-wide configuration.
 
 ## 🔧 Configuration
 

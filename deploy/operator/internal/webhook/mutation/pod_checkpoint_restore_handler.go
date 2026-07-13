@@ -12,6 +12,7 @@ import (
 
 	configv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/config/v1alpha1"
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,13 +33,18 @@ const (
 )
 
 type PodCheckpointRestoreMutator struct {
-	client ctrlclient.Client
-	config *configv1alpha1.OperatorConfiguration
-	scheme *runtime.Scheme
+	client   ctrlclient.Client
+	config   *configv1alpha1.OperatorConfiguration
+	resolver features.Resolver
+	scheme   *runtime.Scheme
 }
 
-func NewPodCheckpointRestoreMutator(client ctrlclient.Client, config *configv1alpha1.OperatorConfiguration) *PodCheckpointRestoreMutator {
-	return &PodCheckpointRestoreMutator{client: client, config: config}
+func NewPodCheckpointRestoreMutator(
+	client ctrlclient.Client,
+	config *configv1alpha1.OperatorConfiguration,
+	resolver features.Resolver,
+) *PodCheckpointRestoreMutator {
+	return &PodCheckpointRestoreMutator{client: client, config: config, resolver: resolver}
 }
 
 func (h *PodCheckpointRestoreMutator) RegisterWithManager(mgr manager.Manager) error {
@@ -49,7 +55,7 @@ func (h *PodCheckpointRestoreMutator) RegisterWithManager(mgr manager.Manager) e
 	return nil
 }
 
-func (h *PodCheckpointRestoreMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
+func (h *PodCheckpointRestoreMutator) Handle(ctx context.Context, req admission.Request) (response admission.Response) {
 	logger := log.FromContext(ctx).WithName(podCheckpointRestoreWebhookName)
 
 	// Restore injection changes pod spec fields that are only meaningful before
@@ -57,8 +63,16 @@ func (h *PodCheckpointRestoreMutator) Handle(ctx context.Context, req admission.
 	if req.Operation != admissionv1.Create {
 		return admission.Allowed("not a pod create")
 	}
-	if h.config == nil || !h.config.Checkpoint.Enabled {
+	gates, gateWarnings := h.resolver.ForNamespace(req.Namespace)
+	defer func() {
+		response.Warnings = append(gateWarnings, response.Warnings...)
+	}()
+	if !gates.Checkpoint {
 		return admission.Allowed("checkpoint disabled")
+	}
+	if h.config == nil {
+		logger.Info("checkpoint restore mutator is unavailable because configuration is nil; allowing pod unchanged")
+		return admission.Allowed("checkpoint restore mutator unavailable")
 	}
 	if h.client == nil {
 		logger.Info("checkpoint restore mutator is unavailable because client is nil; allowing pod unchanged")

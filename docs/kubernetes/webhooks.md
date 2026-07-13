@@ -345,7 +345,8 @@ Cluster:
 2. **Cluster-wide operator** watches for Leases named `dynamo-operator-namespace-scope`
 3. **Cluster-wide operator** skips reconciliation for namespaces with active Leases
 4. **Namespace-restricted operator** reconciles its namespace
-5. **Cluster-wide validation** applies the effective feature gates published in the Lease
+5. **Cluster-wide admission** applies the effective feature gates published in the Lease,
+   including validation and feature-dependent mutation
 
 CRD schema and CEL validation always apply. Conversion, defaulting, mutation, and validation
 are always served by the cluster-wide operator.
@@ -364,7 +365,7 @@ namespaceRestriction:
   enabled: false
 # → Watches for leases in all namespaces
 # → Skips reconciliation for namespaces with active leases
-# → Applies namespace feature gates during global validation
+# → Applies namespace feature gates during global admission
 
 # Namespace-restricted operator
 namespaceRestriction:
@@ -373,6 +374,10 @@ namespaceRestriction:
 # → Creates lease in team-a namespace
 # → Reconciles team-a and publishes its effective feature gates
 ```
+
+Checkpoint restore mutation uses the namespace's `checkpoint` gate. Checkpoint storage
+and seccomp settings still come from the cluster-wide operator, so namespaced checkpoint
+tests must use compatible cluster-wide configuration.
 
 ### Deployment Example
 

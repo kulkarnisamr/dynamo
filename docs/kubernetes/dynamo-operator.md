@@ -67,9 +67,9 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.upgradeCRD=false
 ```
 
-The namespaced operator starts only when the global validating webhook advertises support
-for Lease-based feature gates. It does not create or serve admission, conversion, or
-defaulting webhooks and does not manage webhook certificates.
+The namespaced operator requires a cluster-wide operator of the same or a newer version
+that supports Lease-based feature gates. It does not create or serve admission, conversion,
+or defaulting webhooks and does not manage webhook certificates.
 
 ---
 
@@ -90,13 +90,18 @@ A **cluster-wide operator** manages most namespaces in a development cluster, wh
 1. Namespace-scoped operator creates a lease named `dynamo-operator-namespace-scope` in its namespace
 2. Cluster-wide operator watches for these lease markers across all namespaces
 3. Cluster-wide operator excludes reconciliation for any namespace with a lease marker
-4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease
+4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease,
+   including validation and feature-dependent mutation
 5. If the namespace-scoped operator stops, its lease expires and cluster-wide reconciliation resumes
 
 > [!CAUTION]
 > Always pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false` for a namespaced operator.
 > Helm installs the chart's `crds/` directory before rendering templates, so the chart cannot detect
 > a missing `--skip-crds` flag.
+
+Checkpoint restore mutation uses the namespace's `checkpoint` gate. Checkpoint storage
+and seccomp settings still come from the cluster-wide operator, so namespaced checkpoint
+tests must use compatible cluster-wide configuration.
 
 **Setup Example:**
 

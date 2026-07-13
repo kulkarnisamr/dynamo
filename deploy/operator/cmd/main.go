@@ -537,7 +537,7 @@ func main() {
 			}
 		}()
 	} else {
-		internalwebhook.SetValidationResolver(features.NewResolver(admissionGates, leaseWatcher.AdmissionGateSnapshot))
+		internalwebhook.SetFeatureResolver(features.NewResolver(admissionGates, leaseWatcher.AdmissionGateSnapshot))
 	}
 
 	dockerSecretRetriever := secrets.NewDockerSecretIndexer(mgr.GetAPIReader(), restrictedNamespace)
@@ -902,7 +902,9 @@ func registerWebhookHandlers(
 
 	setupLog.Info("Registering mutation webhooks")
 
-	podCheckpointRestoreMutator := webhookmutation.NewPodCheckpointRestoreMutator(mgr.GetClient(), operatorCfg)
+	podCheckpointRestoreMutator := webhookmutation.NewPodCheckpointRestoreMutator(
+		mgr.GetClient(), operatorCfg, internalwebhook.FeatureResolver(),
+	)
 	if err := podCheckpointRestoreMutator.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register Pod checkpoint restore mutating webhook: %w", err)
 	}

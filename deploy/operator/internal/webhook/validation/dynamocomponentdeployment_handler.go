@@ -173,7 +173,7 @@ func (h *DynamoComponentDeploymentHandler) registerWithManager(
 	path string,
 	validator admission.CustomValidator,
 ) {
-	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.ValidationResolver())
+	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.FeatureResolver())
 	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoComponentDeployment)
 
 	webhook := admission.
