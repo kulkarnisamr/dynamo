@@ -52,6 +52,7 @@ zmq = { version = "0.10", optional = true }
 uuid = { workspace = true }
 validator = { workspace = true }
 xxhash-rust = { workspace = true }
+zeroize = { workspace = true }
 
 # dependencies
 flume = "0.12.0"

@@ -41,6 +41,9 @@ The Rust HTTP server also reads these environment variables (not exposed as CLI 
 | `--router-reset-states` / `--no-router-reset-states` | `DYN_ROUTER_RESET_STATES` | `false` | Reset router state on startup. **Warning:** affects existing replicas |
 | `--router-track-active-blocks` / `--no-router-track-active-blocks` | `DYN_ROUTER_TRACK_ACTIVE_BLOCKS` | `true` | Track blocks used by in-progress requests for load balancing |
 | `--router-assume-kv-reuse` / `--no-router-assume-kv-reuse` | `DYN_ROUTER_ASSUME_KV_REUSE` | `true` | Assume KV cache reuse when tracking active blocks |
+| `--router-tracking-hash` | `DYN_ROUTER_TRACKING_HASH` | `public-xxh3-v1` | Tracking-identity algorithm: `public-xxh3-v1` or experimental `keyed-xxh3-v1` |
+| `--router-tracking-key-file` | `DYN_ROUTER_TRACKING_KEY_FILE` | — | File containing exactly 32 raw key bytes. Required by `keyed-xxh3-v1` |
+| `--router-tracking-key-id` | `DYN_ROUTER_TRACKING_KEY_ID` | — | Nonempty provider-managed key epoch. Required by `keyed-xxh3-v1` |
 | `--router-track-output-blocks` / `--no-router-track-output-blocks` | `DYN_ROUTER_TRACK_OUTPUT_BLOCKS` | `false` | Track output blocks with fractional decay during generation |
 | `--router-track-prefill-tokens` / `--no-router-track-prefill-tokens` | `DYN_ROUTER_TRACK_PREFILL_TOKENS` | `true` | Track prompt-side prefill load in worker load accounting |
 | `--router-prefill-load-model` | `DYN_ROUTER_PREFILL_LOAD_MODEL` | `none` | Prompt-side load model: `none` for static load, `aic` for oldest-prefill decay using an AIC prediction |
