@@ -648,11 +648,8 @@ func main() {
 		}
 	}
 
-	// CertManager.SetupAndRunOnce has already bootstrapped auto-mode TLS
-	// secrets before this point. Auto mode can therefore patch admission and
-	// conversion CAs immediately; manual mode waits for externally provided
-	// ca.crt and only patches conversion, leaving admission CA management
-	// out-of-band.
+	// Namespaced operators register no webhooks, so only cluster-wide operators inject CAs.
+	// Auto mode patches admission and conversion; manual mode patches only conversion.
 	if isClusterWide {
 		caInjector, err := internalcert.NewCABundleInjector(directClient, operatorCfg)
 		if err != nil {

@@ -7,8 +7,20 @@ templates:
 tests:
   - it: gives cluster-wide API mutation permissions only to the cluster-wide operator
     asserts:
-      - hasDocuments:
-          count: 4
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - apiextensions.k8s.io
+            resources:
+              - customresourcedefinitions
+            verbs:
+              - get
+              - list
+              - watch
+              - update
+              - patch
+        documentIndex: 2
 
   - it: renders no webhook RBAC for a namespaced operator
     set:

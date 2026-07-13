@@ -30,6 +30,15 @@ tests:
       - notExists:
           path: webhooks[0].namespaceSelector
         documentIndex: 1
+      - notExists:
+          path: webhooks[1].namespaceSelector
+        documentIndex: 1
+      - notExists:
+          path: webhooks[2].namespaceSelector
+        documentIndex: 1
+      - notExists:
+          path: webhooks[3].namespaceSelector
+        documentIndex: 1
 
   - it: renders no admission configuration for a namespaced installation
     template: charts/dynamo-operator/templates/webhook-configuration.yaml
