@@ -132,12 +132,12 @@ func (lw *LeaseWatcher) Start(ctx context.Context) error {
 	_, err := leaseInformer.AddEventHandler(k8sCache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if lease := lw.extractLease(obj); lease != nil {
-				lw.handleLeaseAdd(lease)
+				lw.handleLease(lease)
 			}
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			if lease := lw.extractLease(newObj); lease != nil {
-				lw.handleLeaseUpdate(lease)
+				lw.handleLease(lease)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -183,43 +183,18 @@ func (lw *LeaseWatcher) extractLease(obj any) *coordinationv1.Lease {
 	return lease
 }
 
-// handleLeaseAdd handles lease creation events
-func (lw *LeaseWatcher) handleLeaseAdd(lease *coordinationv1.Lease) {
+// handleLease stores active reconciliation leases and removes expired ones.
+func (lw *LeaseWatcher) handleLease(lease *coordinationv1.Lease) {
 	// Only process namespace reconciliation leases.
 	if !lw.isNamespaceScopeMarker(lease) {
 		return
 	}
 
-	// Don't add if already expired (defensive - shouldn't happen in practice)
 	if lw.isLeaseExpired(lease) {
-		lw.logger.V(1).Info("Ignoring already-expired lease on add",
-			"namespace", lease.Namespace)
-		return
-	}
-
-	lw.addExcludedNamespace(lease)
-}
-
-// handleLeaseUpdate handles lease update events (renewals)
-func (lw *LeaseWatcher) handleLeaseUpdate(lease *coordinationv1.Lease) {
-	// Only process namespace reconciliation leases.
-	if !lw.isNamespaceScopeMarker(lease) {
-		return
-	}
-
-	// If lease expired, remove from exclusion list
-	// This handles the critical case where namespace-scoped operator crashes
-	// without deleting its lease - we detect expiry and resume processing
-	if lw.isLeaseExpired(lease) {
-		lw.logger.Info("Lease expired on update, resuming cluster-wide processing",
-			"namespace", lease.Namespace,
-			"renewTime", lease.Spec.RenewTime,
-			"leaseDuration", lease.Spec.LeaseDurationSeconds)
 		lw.removeExcludedNamespace(lease.Namespace)
 		return
 	}
 
-	// Lease still valid - update with fresh lease object (refreshes RenewTime)
 	lw.addExcludedNamespace(lease)
 }
 
@@ -248,7 +223,9 @@ func (lw *LeaseWatcher) addExcludedNamespace(lease *coordinationv1.Lease) {
 
 // removeExcludedNamespace removes a namespace from the exclusion list
 func (lw *LeaseWatcher) removeExcludedNamespace(namespace string) {
-	lw.excludedNamespaces.Delete(namespace)
+	if _, found := lw.excludedNamespaces.LoadAndDelete(namespace); !found {
+		return
+	}
 	lw.logger.Info("Resuming namespace processing in cluster-wide operator",
 		"namespace", namespace,
 		"reason", "namespace-restricted operator lease expired or deleted")
@@ -257,7 +234,6 @@ func (lw *LeaseWatcher) removeExcludedNamespace(namespace string) {
 // isNamespaceScopeMarker checks if a lease is the namespace reconciliation lease.
 func (lw *LeaseWatcher) isNamespaceScopeMarker(lease *coordinationv1.Lease) bool {
 	// The well-known name preserves compatibility with existing installations.
-	// Labels are added for observability/filtering but not required for identification
 	return lease.Name == LeaseName
 }
 

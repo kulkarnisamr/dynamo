@@ -30,9 +30,9 @@ Dynamo operator is a Kubernetes operator that simplifies the deployment, configu
 
 ## Deployment Modes
 
-The Dynamo operator has one supported production mode and two development/test configurations:
+The Dynamo operator has one supported production mode and one development/test configuration.
 
-### 1. Cluster-Wide Mode (Default, Recommended)
+### Cluster-Wide Mode
 
 The operator monitors and manages DynamoGraph resources across **all namespaces** in the cluster.
 
@@ -42,43 +42,16 @@ The operator monitors and manages DynamoGraph resources across **all namespaces*
 - You want centralized management of all Dynamo workloads
 - Standard production deployment on a dedicated cluster
 
----
-
-### 2. Namespace-Scoped Mode (Development and Testing Only)
+### Cluster-Wide Plus Namespaced Mode
 
 > [!WARNING]
-> Namespace-scoped mode (`namespaceRestriction.enabled=true`) is not supported for production. Use it only for development and testing.
+> Namespaced mode is only for development and testing. It is not supported for production.
+> Use a single cluster-wide operator in production.
 
-The operator monitors and manages DynamoGraph resources **only in a specific namespace**. A Lease claim makes the cluster-wide reconciler stand down there and publishes the namespaced operator's effective feature gates. The cluster-wide operator continues to serve all admission and conversion webhooks.
-
-**When to Use:**
-
-- You want to test a new operator version in isolation
-- You are developing controller behavior in one namespace
-
-**Installation:**
-
-```bash
-helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
-  --namespace my-namespace \
-  --create-namespace \
-  --skip-crds \
-  --set dynamo-operator.namespaceRestriction.enabled=true \
-  --set dynamo-operator.upgradeCRD=false
-```
-
-The namespaced operator requires a cluster-wide operator of the same or a newer version
-that supports Lease-based feature gates. It does not create or serve admission, conversion,
-or defaulting webhooks and does not manage webhook certificates.
-
----
-
-### 3. Cluster-Wide Plus Namespace-Scoped Mode (Development and Testing Only)
-
-> [!WARNING]
-> This configuration is not supported for production. Use a single cluster-wide operator in production.
-
-A **cluster-wide operator** manages most namespaces in a development cluster, while **one or more namespace-scoped operators** run in specific namespaces for testing. The cluster-wide operator automatically detects and excludes namespaces with namespace-scoped operators using lease markers.
+A cluster-wide operator owns the Custom Resource Definitions (CRDs), conversion, defaulting,
+mutation, and validation. A namespaced operator serves no webhooks and reconciles only its target
+namespace. Its Lease claim makes the cluster-wide reconcilers stand down there and publishes its
+effective feature gates.
 
 **When to Use:**
 
@@ -87,23 +60,18 @@ A **cluster-wide operator** manages most namespaces in a development cluster, wh
 
 **How It Works:**
 
-1. Namespace-scoped operator creates a lease named `dynamo-operator-namespace-scope` in its namespace
-2. Cluster-wide operator watches for these lease markers across all namespaces
-3. Cluster-wide operator excludes reconciliation for any namespace with a lease marker
+1. A namespaced operator creates a Lease named `dynamo-operator-namespace-scope` in its namespace.
+2. The cluster-wide operator watches for these Leases across all namespaces.
+3. Cluster-wide reconcilers hold requests for any namespace with an active Lease.
 4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease,
-   including validation and feature-dependent mutating admission such as defaulting
-5. If the namespace-scoped operator stops, its lease expires and cluster-wide reconciliation resumes
+   including validation and feature-dependent mutating admission such as defaulting.
+5. A successor renews the Lease during leader handoff. Otherwise, the Lease expires and
+   cluster-wide reconciliation resumes.
 
 > [!CAUTION]
-> Always pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false` for a namespaced operator.
-> Helm installs the chart's `crds/` directory before rendering templates, so the chart cannot detect
-> a missing `--skip-crds` flag.
-
-Checkpoint restore mutation uses the namespace's `checkpoint` gate. Checkpoint storage
-and seccomp settings still come from the cluster-wide operator, so namespaced checkpoint
-tests must use compatible cluster-wide configuration.
-
-**Setup Example:**
+> Always pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false` when installing a
+> namespaced operator. Helm installs the chart's `crds/` directory before it renders templates, so
+> the chart cannot detect a missing `--skip-crds` flag.
 
 ```bash
 # 1. Install the cluster-wide operator in a development cluster
@@ -111,7 +79,7 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace dynamo-system \
   --create-namespace
 
-# 2. Install namespace-scoped operator (testing, v2.0.0-beta)
+# 2. Install a namespaced operator (testing, v2.0.0-beta)
 helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace test-namespace \
   --create-namespace \
@@ -121,10 +89,21 @@ helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.controllerManager.manager.image.tag=v2.0.0-beta
 ```
 
+Set `namespaceRestriction.targetNamespace` when the reconciliation target differs from the Helm
+release namespace.
+
 Every released namespaced operator requires a cluster-wide operator of the same or a newer
 version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
 supported with a 1.2 cluster-wide operator. For controller development, newer namespaced
 code may run if it remains compatible with the cluster-wide CRDs and global webhooks.
+
+The Lease remains during leader handoff so a successor can renew it. If no successor takes over,
+the Lease expires after `namespaceRestriction.lease.duration` and cluster-wide reconciliation
+resumes. Global admission continues throughout.
+
+Checkpoint restore mutation uses the namespace's `checkpoint` gate. Checkpoint storage
+and seccomp settings still come from the cluster-wide operator, so namespaced checkpoint
+tests must use compatible cluster-wide configuration.
 
 **Observability:**
 
@@ -136,7 +115,6 @@ kubectl get lease -A --field-selector metadata.name=dynamo-operator-namespace-sc
 kubectl get lease -n my-namespace dynamo-operator-namespace-scope \
   -o jsonpath='{.spec.holderIdentity}'
 ```
-
 
 ## Custom Resource Definitions (CRDs)
 
@@ -223,7 +201,7 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz --namespace 
 ```
 
 > [!NOTE]
-> Namespace-scoped configurations are only for development and testing and are not supported for production. See [Deployment Modes](#deployment-modes).
+> Namespaced configurations are only for development and testing and are not supported for production. See [Deployment Modes](#deployment-modes).
 
 ### Building from Source
 

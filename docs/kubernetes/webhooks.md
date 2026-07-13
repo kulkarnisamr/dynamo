@@ -327,91 +327,26 @@ helm install dynamo-platform . -n <namespace> -f values.yaml
 > [!WARNING]
 > Namespace-restricted and multi-operator configurations are only for development and testing. They are not supported for production. Use a single cluster-wide operator in production.
 
-The operator supports running both **cluster-wide** and **namespace-restricted** instances simultaneously using a **lease-based coordination mechanism**.
+The cluster-wide operator always serves conversion, defaulting, mutation, and validation. A
+namespaced operator serves no webhooks. Its Lease named `dynamo-operator-namespace-scope` changes
+two behaviors for the Lease namespace:
 
-### Scenario
+- Cluster-wide reconcilers hold queued requests until the Lease expires.
+- Cluster-wide admission uses the complete feature-gate snapshot from the Lease.
 
-```text
-Cluster:
-├─ Operator A (cluster-wide, namespace: platform-system)
-│  └─ Owns CRDs and global conversion, defaulting, mutation, and validation
-└─ Operator B (namespace-restricted, namespace: team-a)
-   └─ Reconciles team-a; publishes its effective feature gates in a Lease
-```
+The Lease annotation `nvidia.com/dynamo-operator-admission-feature-gates` contains the snapshot.
+Known values override the cluster-wide gates in either direction. Unknown values produce an
+admission warning and are ignored. Custom Resource Definition (CRD) schema and Common Expression
+Language (CEL) validation continue to apply.
 
-### How It Works
+The Lease remains during leader handoff so a successor can renew it. If no successor takes over,
+the Lease expires and cluster-wide reconciliation resumes. Global admission continues throughout.
 
-1. **Namespace-restricted operator** creates a Lease in its namespace
-2. **Cluster-wide operator** watches for Leases named `dynamo-operator-namespace-scope`
-3. **Cluster-wide operator** skips reconciliation for namespaces with active Leases
-4. **Namespace-restricted operator** reconciles its namespace
-5. **Cluster-wide admission** applies the effective feature gates published in the Lease,
-   including validation and feature-dependent mutating admission such as defaulting
+Checkpoint restore mutation uses the namespace's `checkpoint` gate. Its storage and seccomp
+settings still come from the cluster-wide operator.
 
-CRD schema and CEL validation always apply. Conversion, defaulting, mutation, and validation
-are always served by the cluster-wide operator.
-
-### Lease Configuration
-
-The lease mechanism is **automatically configured** based on deployment mode:
-
-The Lease annotation `nvidia.com/dynamo-operator-admission-feature-gates` contains the
-namespaced operator's complete effective gate snapshot. Known Lease values override global
-values in either direction. Unknown values produce an admission warning and are ignored.
-
-```yaml
-# Cluster-wide operator (default)
-namespaceRestriction:
-  enabled: false
-# → Watches for leases in all namespaces
-# → Skips reconciliation for namespaces with active leases
-# → Applies namespace feature gates during global admission
-
-# Namespace-restricted operator
-namespaceRestriction:
-  enabled: true
-  targetNamespace: team-a
-# → Creates lease in team-a namespace
-# → Reconciles team-a and publishes its effective feature gates
-```
-
-Checkpoint restore mutation uses the namespace's `checkpoint` gate. Checkpoint storage
-and seccomp settings still come from the cluster-wide operator, so namespaced checkpoint
-tests must use compatible cluster-wide configuration.
-
-### Deployment Example
-
-```bash
-# 1. Deploy cluster-wide operator
-helm install platform-operator dynamo-platform \
-  -n platform-system \
-  --set dynamo-operator.namespaceRestriction.enabled=false
-
-# 2. Deploy namespace-restricted operator for team-a
-helm install team-a-operator dynamo-platform \
-  -n team-a \
-  --skip-crds \
-  --set dynamo-operator.namespaceRestriction.enabled=true \
-  --set dynamo-operator.namespaceRestriction.targetNamespace=team-a \
-  --set dynamo-operator.upgradeCRD=false
-```
-
-Always pass `--skip-crds` for a namespace-restricted release. Helm installs the `crds/`
-directory before templates can enforce `upgradeCRD=false` and cannot detect a missing
-`--skip-crds` flag.
-
-Every released namespaced operator requires a cluster-wide operator of the same or a newer
-version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
-supported with a 1.2 cluster-wide operator. For controller development, newer namespaced
-code may run if it remains compatible with the cluster-wide CRDs and global webhooks.
-
-### Lease Health
-
-If the namespace-restricted operator is deleted or becomes unhealthy:
-
-- The release deletes its Lease during graceful shutdown
-- An abandoned Lease expires after `leaseDuration` (30 seconds by default)
-- The cluster-wide operator resumes reconciliation and Go validation for that namespace
+See [Dynamo Operator](dynamo-operator.md) for the development/test installation procedure,
+including the required `--skip-crds` option.
 
 ---
 

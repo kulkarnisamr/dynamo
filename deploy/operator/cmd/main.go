@@ -277,7 +277,8 @@ func main() {
 	}
 
 	restrictedNamespace := operatorCfg.Namespace.Restricted
-	if restrictedNamespace != "" {
+	isClusterWide := restrictedNamespace == ""
+	if !isClusterWide {
 		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
 			restrictedNamespace: {},
 		}
@@ -311,7 +312,7 @@ func main() {
 	// Only the cluster-wide operator owns webhook certificates and registrations.
 	var directClient client.Client
 	var certMgr *internalcert.CertManager
-	if restrictedNamespace == "" {
+	if isClusterWide {
 		directClient, err = client.New(mgr.GetConfig(), client.Options{Scheme: crdScheme})
 		if err != nil {
 			setupLog.Error(err, "unable to create direct client for cert management")
@@ -331,7 +332,7 @@ func main() {
 	// Leases transfer reconciliation ownership. Cluster-wide admission consumes
 	// their feature snapshots and operator identities but never delegates validation.
 	var leaseWatcher *namespace_scope.LeaseWatcher
-	if restrictedNamespace == "" {
+	if isClusterWide {
 		setupLog.Info("Setting up namespace reconciliation lease watcher")
 
 		leaseWatcher, err = namespace_scope.NewLeaseWatcher(mgr.GetConfig())
@@ -502,13 +503,16 @@ func main() {
 			"envVar", features.GMSSnapshotEnvVar,
 		)
 	}
-	operatorPrincipal := operatorServiceAccountPrincipal()
-	if operatorPrincipal == "" {
-		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
-	} else {
+	var operatorPrincipal string
+	serviceAccount := os.Getenv("POD_SERVICE_ACCOUNT")
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	if serviceAccount != "" && podNamespace != "" {
+		operatorPrincipal = fmt.Sprintf("system:serviceaccount:%s:%s", podNamespace, serviceAccount)
 		setupLog.Info("Detected operator principal from downward API", "principal", operatorPrincipal)
+	} else {
+		setupLog.Info("POD_SERVICE_ACCOUNT/POD_NAMESPACE not set; operator SA self-identification disabled")
 	}
-	if restrictedNamespace != "" {
+	if !isClusterWide {
 		leaseManager, err := namespace_scope.NewLeaseManager(
 			mgr.GetConfig(),
 			restrictedNamespace,
@@ -534,7 +538,7 @@ func main() {
 	// refresh whenever a secret is created/deleted/updated
 	// Set up informer
 	var factory informers.SharedInformerFactory
-	if restrictedNamespace == "" {
+	if isClusterWide {
 		factory = informers.NewSharedInformerFactory(kubernetes.NewForConfigOrDie(mgr.GetConfig()), time.Hour*24)
 	} else {
 		factory = informers.NewSharedInformerFactoryWithOptions(
@@ -637,7 +641,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if restrictedNamespace == "" {
+	if isClusterWide {
 		if err := registerWebhookHandlers(mgr, operatorCfg, operatorVersion, operatorPrincipal, leaseWatcher); err != nil {
 			setupLog.Error(err, "failed to register webhooks")
 			os.Exit(1)
@@ -649,7 +653,7 @@ func main() {
 	// conversion CAs immediately; manual mode waits for externally provided
 	// ca.crt and only patches conversion, leaving admission CA management
 	// out-of-band.
-	if restrictedNamespace == "" {
+	if isClusterWide {
 		caInjector, err := internalcert.NewCABundleInjector(directClient, operatorCfg)
 		if err != nil {
 			setupLog.Error(err, "unable to create CA bundle injector")
@@ -673,7 +677,7 @@ func main() {
 	// mgr.Start reads tls.crt and tls.key from the projected Secret volume
 	// synchronously. Secret API updates are not enough because kubelet projects
 	// them into already-running pods asynchronously.
-	if certMgr != nil {
+	if isClusterWide {
 		if err := certMgr.WaitForMountedCertificate(mainCtx); err != nil {
 			setupLog.Error(err, "failed waiting for mounted webhook TLS certificate")
 			os.Exit(1)
@@ -808,15 +812,6 @@ func registerControllers(
 	return nil
 }
 
-func operatorServiceAccountPrincipal() string {
-	serviceAccount := os.Getenv("POD_SERVICE_ACCOUNT")
-	namespace := os.Getenv("POD_NAMESPACE")
-	if serviceAccount == "" || namespace == "" {
-		return ""
-	}
-	return fmt.Sprintf("system:serviceaccount:%s:%s", namespace, serviceAccount)
-}
-
 func registerWebhookHandlers(
 	mgr ctrl.Manager,
 	operatorCfg *configv1alpha1.OperatorConfiguration,
@@ -824,10 +819,6 @@ func registerWebhookHandlers(
 	operatorPrincipal string,
 	namespaceOperatorPrincipals webhookvalidation.NamespaceOperatorPrincipalResolver,
 ) error {
-	if operatorCfg.Namespace.Restricted != "" {
-		return fmt.Errorf("defaulting, mutation, and conversion webhooks can only be registered by the cluster-wide operator")
-	}
-
 	setupLog.Info("Registering validation webhooks")
 
 	dcdHandler := webhookvalidation.NewDynamoComponentDeploymentHandler()

@@ -58,16 +58,10 @@ Exactly one cluster-wide Dynamo operator must own the cluster-wide API. It insta
 updates the CRDs and owns global conversion, defaulting, mutation, and validation.
 Multiple cluster-wide installations are rejected.
 
-> **DEVELOPMENT AND TESTING ONLY:** Namespace-restricted mode is not supported for
-> production.
+### DEVELOPMENT AND TESTING ONLY: Namespaced Installation
 
-Namespaced operators reconcile only their target namespace and renew a namespace-scoped
-Lease that makes the cluster-wide operator's reconcilers hold off. The Lease publishes their
-effective feature gates. CRD schema and CEL validation still apply, while admission and
-conversion are always served globally by the cluster-wide operator.
-
-### DEVELOPMENT AND TESTING ONLY: Installing a Namespaced Operator
-
+> Namespace-restricted mode is not supported for production.
+>
 > **CRITICAL: Always pass `--skip-crds` and set `upgradeCRD=false`.** Helm processes a
 > chart's `crds/` directory before rendering templates, so the chart cannot validate or
 > infer `--skip-crds`. Omitting it can install cluster-wide CRDs from the namespaced
@@ -83,41 +77,9 @@ helm install tenant-dynamo . \
   --set dynamo-operator.upgradeCRD=false
 ```
 
-`namespaceRestriction.targetNamespace` may be set when the reconciliation target differs
-from the Helm release namespace. The namespaced operator does not create or serve webhooks.
-It publishes its complete effective feature-gate snapshot in the reconciliation Lease, and
-cluster-wide admission applies that snapshot to requests in the namespace. The
-cluster-wide operator must support Lease-based feature gates.
-
-Every released namespaced operator requires a cluster-wide operator of the same or a newer
-version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
-supported with a 1.2 cluster-wide operator. For development, newer namespaced controller
-code may run only while it remains compatible with the cluster-wide CRDs and global
-webhooks.
-
-The namespaced release never runs `crd-apply` or serves admission or conversion webhooks.
-On shutdown it releases its reconciliation Lease; after an ungraceful shutdown the Lease
-expires, allowing cluster-wide reconciliation to resume.
-
-When upgrading an existing deployment, upgrade the cluster-wide release first and then
-each namespaced release. Remove any configured `webhook.namespaceSelector` before the
-upgrade and set `upgradeCRD=false` on every namespaced release. The existing Lease name
-and timing values remain compatible.
-
-### Validation and Safety
-
-- **Single cluster-wide owner**: installation fails if another cluster-wide operator exists.
-- **No namespaced CRD upgrades**: `namespaceRestriction.enabled=true` with
-  `upgradeCRD=true` is rejected.
-- **Global webhook scope**: setting `webhook.namespaceSelector` causes installation to fail.
-- **Reconciliation leases**: cluster-wide reconcilers skip namespaces with an active
-  namespaced-operator Lease. Global validation and feature-dependent mutating admission,
-  including defaulting, apply the feature gates from that Lease; CRD schema/CEL and
-  conversion continue to apply.
-
-Checkpoint restore mutation uses the namespace's `checkpoint` gate. Its storage and
-seccomp settings remain cluster-wide, so namespaced checkpoint tests must use compatible
-cluster-wide configuration.
+The namespaced operator serves no webhooks and requires a cluster-wide operator of the same or a
+newer version. See the [Dynamo operator deployment modes](https://github.com/ai-dynamo/dynamo/blob/main/docs/kubernetes/dynamo-operator.md)
+for ownership, feature-gate, version compatibility, and Lease lifecycle details.
 
 ## 🔧 Configuration
 
