@@ -15,7 +15,7 @@ use dynamo_kv_router::{
 use tokio::sync::oneshot;
 
 use super::worker_monitor::LoadThresholdConfig;
-use super::{Model, RuntimeConfigWatch, WorkerSet, runtime_config_watch};
+use super::{GenerateEngineSelection, Model, RuntimeConfigWatch, WorkerSet, runtime_config_watch};
 
 use dynamo_runtime::{
     component::{Endpoint, build_transport_type},
@@ -479,21 +479,11 @@ impl ModelManager {
     pub fn get_generate_engine(
         &self,
         model: &str,
-    ) -> Result<GenerateStreamingEngine, ModelManagerError> {
+    ) -> Result<GenerateEngineSelection, ModelManagerError> {
         self.models
             .get(model)
             .ok_or_else(|| ModelManagerError::ModelNotFound(model.to_string()))?
             .get_generate_engine()
-    }
-
-    pub fn get_generate_engine_with_routing_metadata(
-        &self,
-        model: &str,
-    ) -> Result<(GenerateStreamingEngine, u32, Option<String>, bool), ModelManagerError> {
-        self.models
-            .get(model)
-            .ok_or_else(|| ModelManagerError::ModelNotFound(model.to_string()))?
-            .get_generate_engine_with_routing_metadata()
     }
 
     // -- Combined engine + parsing options (atomically from one WorkerSet) --
@@ -528,22 +518,6 @@ impl ModelManager {
             .get(model)
             .ok_or_else(|| ModelManagerError::ModelNotFound(model.to_string()))?
             .get_completions_engine_with_parsing()
-    }
-
-    pub fn get_generate_engine_with_parsing(
-        &self,
-        model: &str,
-    ) -> Result<
-        (
-            GenerateStreamingEngine,
-            crate::protocols::openai::ParsingOptions,
-        ),
-        ModelManagerError,
-    > {
-        self.models
-            .get(model)
-            .ok_or_else(|| ModelManagerError::ModelNotFound(model.to_string()))?
-            .get_generate_engine_with_parsing()
     }
 
     // -- Convenience methods for in-process models (http.rs, grpc.rs) --
