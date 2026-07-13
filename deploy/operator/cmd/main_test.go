@@ -17,7 +17,7 @@ func TestRegisterWebhookHandlersRejectsNamespacedMode(t *testing.T) {
 		Namespace: configv1alpha1.NamespaceConfiguration{Restricted: "tenant-a"},
 	}
 
-	err := registerWebhookHandlers(nil, operatorConfig, nil, "test")
+	err := registerWebhookHandlers(nil, operatorConfig, "test")
 	if err == nil || !strings.Contains(err.Error(), "cluster-wide operator") {
 		t.Fatalf("expected cluster-wide ownership error, got %v", err)
 	}

@@ -91,7 +91,7 @@ A **cluster-wide operator** manages most namespaces in a development cluster, wh
 2. Cluster-wide operator watches for these lease markers across all namespaces
 3. Cluster-wide operator excludes reconciliation for any namespace with a lease marker
 4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease,
-   including validation and feature-dependent mutation
+   including validation and feature-dependent mutating admission such as defaulting
 5. If the namespace-scoped operator stops, its lease expires and cluster-wide reconciliation resumes
 
 > [!CAUTION]

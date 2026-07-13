@@ -346,7 +346,7 @@ Cluster:
 3. **Cluster-wide operator** skips reconciliation for namespaces with active Leases
 4. **Namespace-restricted operator** reconciles its namespace
 5. **Cluster-wide admission** applies the effective feature gates published in the Lease,
-   including validation and feature-dependent mutation
+   including validation and feature-dependent mutating admission such as defaulting
 
 CRD schema and CEL validation always apply. Conversion, defaulting, mutation, and validation
 are always served by the cluster-wide operator.

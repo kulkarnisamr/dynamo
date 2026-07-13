@@ -25,6 +25,7 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	internalwebhook "github.com/ai-dynamo/dynamo/deploy/operator/internal/webhook"
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,7 +46,7 @@ const (
 // for version-gated behavior changes in the controller.
 type DGDDefaulter struct {
 	OperatorVersion string
-	GroveEnabled    bool
+	resolver        features.Resolver
 }
 
 // dgdV1Alpha1Defaulter keeps the previous endpoint available during the
@@ -55,11 +56,11 @@ type dgdV1Alpha1Defaulter struct {
 	defaulter *DGDDefaulter
 }
 
-// NewDGDDefaulter creates a new DGDDefaulter with the given operator version.
-func NewDGDDefaulter(operatorVersion string, groveEnabled bool) *DGDDefaulter {
+// NewDGDDefaulter creates a new DGDDefaulter with the given operator version and feature resolver.
+func NewDGDDefaulter(operatorVersion string, resolver features.Resolver) *DGDDefaulter {
 	return &DGDDefaulter{
 		OperatorVersion: operatorVersion,
-		GroveEnabled:    groveEnabled,
+		resolver:        resolver,
 	}
 }
 
@@ -99,7 +100,8 @@ func (d *DGDDefaulter) defaultV1Beta1(
 	// default the controller panics on a nil pointer dereference in
 	// expandRolesForComponent(). Apply on every operation so that components
 	// added via UPDATE also get the default.
-	grovePathway := d.isGrovePathway(dgd)
+	gates, _ := d.resolver.ForNamespace(dgd.Namespace)
+	grovePathway := d.isGrovePathway(dgd, gates)
 	for i := range dgd.Spec.Components {
 		component := &dgd.Spec.Components[i]
 		if component.Replicas == nil {
@@ -127,8 +129,11 @@ func (d *DGDDefaulter) defaultV1Beta1(
 	return nil
 }
 
-func (d *DGDDefaulter) isGrovePathway(dgd *nvidiacomv1beta1.DynamoGraphDeployment) bool {
-	return d.GroveEnabled && (dgd.Annotations == nil ||
+func (d *DGDDefaulter) isGrovePathway(
+	dgd *nvidiacomv1beta1.DynamoGraphDeployment,
+	gates features.Gates,
+) bool {
+	return gates.Grove && (dgd.Annotations == nil ||
 		strings.ToLower(dgd.Annotations[consts.KubeAnnotationEnableGrove]) != consts.KubeLabelValueFalse)
 }
 

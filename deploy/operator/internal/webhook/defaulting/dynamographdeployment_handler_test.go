@@ -24,6 +24,7 @@ import (
 	nvidiacomv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1alpha1"
 	nvidiacomv1beta1 "github.com/ai-dynamo/dynamo/deploy/operator/api/v1beta1"
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/consts"
+	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,6 +44,10 @@ func admissionCtx(op admissionv1.Operation, kind schema.GroupVersionKind) contex
 			},
 		},
 	})
+}
+
+func newDGDDefaulterForTest(operatorVersion string, groveEnabled bool) *DGDDefaulter {
+	return NewDGDDefaulter(operatorVersion, features.NewResolver(features.Gates{Grove: groveEnabled}, nil))
 }
 
 func TestDGDDefaulter_Default(t *testing.T) {
@@ -154,7 +159,7 @@ func TestDGDDefaulter_Default(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defaulter := NewDGDDefaulter(tt.operatorVersion, false)
+			defaulter := newDGDDefaulterForTest(tt.operatorVersion, false)
 
 			err := defaulter.Default(tt.ctx, tt.dgd)
 			if (err != nil) != tt.wantErr {
@@ -230,7 +235,7 @@ func TestDGDDefaulter_DefaultsNilReplicas(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defaulter := NewDGDDefaulter("0.9.0", false)
+			defaulter := newDGDDefaulterForTest("0.9.0", false)
 			dgd := &nvidiacomv1beta1.DynamoGraphDeployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 				Spec: nvidiacomv1beta1.DynamoGraphDeploymentSpec{
@@ -264,6 +269,7 @@ func TestDGDDefaulter_DefaultsGroveMinAvailable(t *testing.T) {
 		name             string
 		op               admissionv1.Operation
 		groveEnabled     bool
+		namespaceGates   string
 		annotations      map[string]string
 		components       []nvidiacomv1beta1.DynamoComponentDeploymentSharedSpec
 		wantMinAvailable map[string]*int32
@@ -379,6 +385,30 @@ func TestDGDDefaulter_DefaultsGroveMinAvailable(t *testing.T) {
 			},
 		},
 		{
+			name:           "namespace gate disables global Grove defaulting",
+			op:             admissionv1.Create,
+			groveEnabled:   true,
+			namespaceGates: `{"grove":false}`,
+			components: []nvidiacomv1beta1.DynamoComponentDeploymentSharedSpec{
+				{ComponentName: "Worker", Replicas: ptr.To(int32(3))},
+			},
+			wantMinAvailable: map[string]*int32{
+				"Worker": nil,
+			},
+		},
+		{
+			name:           "namespace gate enables Grove defaulting over global disabled",
+			op:             admissionv1.Create,
+			groveEnabled:   false,
+			namespaceGates: `{"grove":true}`,
+			components: []nvidiacomv1beta1.DynamoComponentDeploymentSharedSpec{
+				{ComponentName: "Worker", Replicas: ptr.To(int32(3))},
+			},
+			wantMinAvailable: map[string]*int32{
+				"Worker": ptr.To(int32(1)),
+			},
+		},
+		{
 			name:         "does not default minAvailable when DGD opts out of Grove",
 			op:           admissionv1.Create,
 			groveEnabled: true,
@@ -396,7 +426,10 @@ func TestDGDDefaulter_DefaultsGroveMinAvailable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defaulter := NewDGDDefaulter("0.9.0", tt.groveEnabled)
+			resolver := features.NewResolver(features.Gates{Grove: tt.groveEnabled}, func(namespace string) (string, bool) {
+				return tt.namespaceGates, tt.namespaceGates != "" && namespace == "default"
+			})
+			defaulter := NewDGDDefaulter("0.9.0", resolver)
 			dgd := &nvidiacomv1beta1.DynamoGraphDeployment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test",
@@ -447,7 +480,7 @@ func TestDGDV1Alpha1Defaulter_Default(t *testing.T) {
 			},
 		},
 	}
-	defaulter := &dgdV1Alpha1Defaulter{defaulter: NewDGDDefaulter("0.9.0", false)}
+	defaulter := &dgdV1Alpha1Defaulter{defaulter: newDGDDefaulterForTest("0.9.0", false)}
 
 	if err := defaulter.Default(admissionCtx(admissionv1.Create, nvidiacomv1alpha1.DynamoGraphDeploymentGVK), dgd); err != nil {
 		t.Fatalf("Default() unexpected error: %v", err)

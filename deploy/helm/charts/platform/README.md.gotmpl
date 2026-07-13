@@ -111,9 +111,9 @@ and timing values remain compatible.
   `upgradeCRD=true` is rejected.
 - **Global webhook scope**: setting `webhook.namespaceSelector` causes installation to fail.
 - **Reconciliation leases**: cluster-wide reconcilers skip namespaces with an active
-  namespaced-operator Lease. Global validation and feature-dependent mutation apply the
-  feature gates from that Lease; CRD schema/CEL, defaulting, and conversion continue to
-  apply.
+  namespaced-operator Lease. Global validation and feature-dependent mutating admission,
+  including defaulting, apply the feature gates from that Lease; CRD schema/CEL and
+  conversion continue to apply.
 
 Checkpoint restore mutation uses the namespace's `checkpoint` gate. Its storage and
 seccomp settings remain cluster-wide, so namespaced checkpoint tests must use compatible

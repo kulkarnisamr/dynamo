@@ -648,7 +648,7 @@ func main() {
 	}
 
 	if restrictedNamespace == "" {
-		if err := registerWebhookHandlers(mgr, operatorCfg, runtimeConfig, operatorVersion); err != nil {
+		if err := registerWebhookHandlers(mgr, operatorCfg, operatorVersion); err != nil {
 			setupLog.Error(err, "failed to register webhooks")
 			os.Exit(1)
 		}
@@ -821,7 +821,6 @@ func registerControllers(
 func registerWebhookHandlers(
 	mgr ctrl.Manager,
 	operatorCfg *configv1alpha1.OperatorConfiguration,
-	runtimeConfig *commonController.RuntimeConfig,
 	operatorVersion string,
 ) error {
 	if operatorCfg.Namespace.Restricted != "" {
@@ -890,7 +889,7 @@ func registerWebhookHandlers(
 		return fmt.Errorf("unable to register DynamoComponentDeployment defaulting webhook: %w", err)
 	}
 
-	dgdDefaulter := webhookdefaulting.NewDGDDefaulter(operatorVersion, runtimeConfig.GroveEnabled)
+	dgdDefaulter := webhookdefaulting.NewDGDDefaulter(operatorVersion, internalwebhook.FeatureResolver())
 	if err := dgdDefaulter.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register DynamoGraphDeployment defaulting webhook: %w", err)
 	}
