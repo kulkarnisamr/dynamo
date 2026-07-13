@@ -10,24 +10,10 @@ tests:
       - hasDocuments:
           count: 4
 
-  - it: grants a namespaced operator read-only capability discovery
+  - it: renders no webhook RBAC for a namespaced operator
     set:
       dynamo-operator.namespaceRestriction.enabled: true
       dynamo-operator.upgradeCRD: false
     asserts:
       - hasDocuments:
-          count: 2
-      - equal:
-          path: rules[0].verbs
-          value:
-            - list
-        documentSelector:
-          path: kind
-          value: ClusterRole
-      - equal:
-          path: rules[0].resources
-          value:
-            - validatingwebhookconfigurations
-        documentSelector:
-          path: kind
-          value: ClusterRole
+          count: 0

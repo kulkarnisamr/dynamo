@@ -30,10 +30,6 @@ tests:
       - notExists:
           path: webhooks[0].namespaceSelector
         documentIndex: 1
-      - equal:
-          path: metadata.labels["nvidia.com/dynamo-operator-lease-admission-feature-gates"]
-          value: v1
-        documentIndex: 0
 
   - it: renders no admission configuration for a namespaced installation
     template: charts/dynamo-operator/templates/webhook-configuration.yaml

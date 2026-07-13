@@ -355,10 +355,7 @@ are always served by the cluster-wide operator.
 The lease mechanism is **automatically configured** based on deployment mode:
 
 The Lease annotation `nvidia.com/dynamo-operator-admission-feature-gates` contains the
-namespaced operator's complete effective gate snapshot. The cluster-wide validating webhook
-configuration advertises
-`nvidia.com/dynamo-operator-lease-admission-feature-gates=v1`. A namespaced operator refuses
-to start if this cluster-scoped capability is missing. Known Lease values override global
+namespaced operator's complete effective gate snapshot. Known Lease values override global
 values in either direction. Unknown values produce an admission warning and are ignored.
 
 ```yaml
@@ -398,10 +395,10 @@ Always pass `--skip-crds` for a namespace-restricted release. Helm installs the 
 directory before templates can enforce `upgradeCRD=false` and cannot detect a missing
 `--skip-crds` flag.
 
-Run the same operator version in parallel whenever possible. Mixing versions is strongly
-discouraged. Otherwise, the cluster-wide operator should be newer and ship the newest APIs.
-For controller development, a newer namespaced operator may run if it remains compatible
-with the cluster-wide CRDs and global webhooks.
+Every released namespaced operator requires a cluster-wide operator of the same or a newer
+version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
+supported with a 1.2 cluster-wide operator. For controller development, newer namespaced
+code may run if it remains compatible with the cluster-wide CRDs and global webhooks.
 
 ### Lease Health
 

@@ -326,16 +326,6 @@ func main() {
 			setupLog.Error(err, "failed to setup webhook certificate management")
 			os.Exit(1)
 		}
-	} else {
-		kubeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
-		if err != nil {
-			setupLog.Error(err, "unable to create client for admission capability check")
-			os.Exit(1)
-		}
-		if err = namespace_scope.RequireClusterWideAdmissionCapability(mainCtx, kubeClient); err != nil {
-			setupLog.Error(err, "namespaced mode requires compatible cluster-wide admission")
-			os.Exit(1)
-		}
 	}
 
 	// Leases transfer reconciliation ownership. Cluster-wide admission consumes

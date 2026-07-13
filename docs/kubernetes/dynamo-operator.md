@@ -116,10 +116,10 @@ helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.controllerManager.manager.image.tag=v2.0.0-beta
 ```
 
-Run the same operator version in parallel whenever possible. Mixing versions is strongly
-discouraged. Otherwise, the cluster-wide operator should be newer and ship the newest APIs.
-For controller development, a newer namespaced operator may run if its code remains
-compatible with the cluster-wide CRDs and global webhooks.
+Every released namespaced operator requires a cluster-wide operator of the same or a newer
+version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
+supported with a 1.2 cluster-wide operator. For controller development, newer namespaced
+code may run if it remains compatible with the cluster-wide CRDs and global webhooks.
 
 **Observability:**
 

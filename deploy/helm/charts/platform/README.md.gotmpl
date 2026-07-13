@@ -87,13 +87,13 @@ helm install tenant-dynamo . \
 from the Helm release namespace. The namespaced operator does not create or serve webhooks.
 It publishes its complete effective feature-gate snapshot in the reconciliation Lease, and
 the cluster-wide validator applies that snapshot to requests in the namespace. The
-namespaced operator refuses to start unless global admission advertises support for this
-protocol.
+cluster-wide operator must support Lease-based feature gates.
 
-Running different operator versions in parallel is strongly discouraged; use the same
-version whenever possible. Otherwise, the cluster-wide operator should be newer and ship
-the newest APIs. For development, newer namespaced controller code may run only while it
-remains compatible with the cluster-wide CRDs and global webhooks.
+Every released namespaced operator requires a cluster-wide operator of the same or a newer
+version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
+supported with a 1.2 cluster-wide operator. For development, newer namespaced controller
+code may run only while it remains compatible with the cluster-wide CRDs and global
+webhooks.
 
 The namespaced release never runs `crd-apply` or serves admission or conversion webhooks.
 On shutdown it releases its reconciliation Lease; after an ungraceful shutdown the Lease
@@ -102,8 +102,7 @@ expires, allowing cluster-wide reconciliation to resume.
 When upgrading an existing deployment, upgrade the cluster-wide release first and then
 each namespaced release. Remove any configured `webhook.namespaceSelector` before the
 upgrade and set `upgradeCRD=false` on every namespaced release. The existing Lease name
-and timing values remain compatible. The cluster-wide validating webhook must advertise
-Lease feature-gate support before a namespaced operator starts.
+and timing values remain compatible.
 
 ### Validation and Safety
 

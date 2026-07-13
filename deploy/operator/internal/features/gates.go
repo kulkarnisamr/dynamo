@@ -24,14 +24,8 @@ func FromEnvironment() Gates {
 	}
 }
 
-const (
-	// LeaseAnnotation stores the namespaced operator's effective feature gates.
-	LeaseAnnotation = "nvidia.com/dynamo-operator-admission-feature-gates"
-	// AdmissionCapabilityLabel marks global admission that understands LeaseAnnotation.
-	AdmissionCapabilityLabel = "nvidia.com/dynamo-operator-lease-admission-feature-gates"
-	// AdmissionCapabilityV1 is the first supported Lease gate protocol.
-	AdmissionCapabilityV1 = "v1"
-)
+// LeaseAnnotation stores the namespaced operator's effective feature gates.
+const LeaseAnnotation = "nvidia.com/dynamo-operator-admission-feature-gates"
 
 // Gates is the complete effective set of operator feature gates.
 // Fields intentionally do not use omitempty: false is an explicit namespaced override.
