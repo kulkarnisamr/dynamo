@@ -903,7 +903,10 @@ func registerWebhookHandlers(
 	setupLog.Info("Registering mutation webhooks")
 
 	podCheckpointRestoreMutator := webhookmutation.NewPodCheckpointRestoreMutator(
-		mgr.GetClient(), operatorCfg, internalwebhook.FeatureResolver(),
+		mgr.GetClient(),
+		operatorCfg.Checkpoint.Storage,
+		operatorCfg.Checkpoint.EffectiveSeccompProfile(),
+		internalwebhook.FeatureResolver(),
 	)
 	if err := podCheckpointRestoreMutator.RegisterWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to register Pod checkpoint restore mutating webhook: %w", err)

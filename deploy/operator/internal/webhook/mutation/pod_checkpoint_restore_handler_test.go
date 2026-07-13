@@ -55,17 +55,14 @@ func TestPodCheckpointRestoreMutatorHandle(t *testing.T) {
 			WithScheme(scheme).
 			WithObjects(readyCheckpoint, notReadyCheckpoint).
 			Build(),
-		&configv1alpha1.OperatorConfiguration{
-			Checkpoint: configv1alpha1.CheckpointConfiguration{
-				Storage: configv1alpha1.CheckpointStorageConfiguration{
-					Type: snapshotprotocol.StorageTypePVC,
-					PVC: configv1alpha1.CheckpointPVCConfig{
-						PVCName:  "snapshot-pvc",
-						BasePath: "/checkpoints",
-					},
-				},
+		configv1alpha1.CheckpointStorageConfiguration{
+			Type: snapshotprotocol.StorageTypePVC,
+			PVC: configv1alpha1.CheckpointPVCConfig{
+				PVCName:  "snapshot-pvc",
+				BasePath: "/checkpoints",
 			},
 		},
+		configv1alpha1.DefaultSeccompProfile,
 		features.NewResolver(features.Gates{Checkpoint: false}, func(namespace string) (string, bool) {
 			if namespace == "default" {
 				return `{"checkpoint":true}`, true
@@ -124,7 +121,8 @@ func TestPodCheckpointRestoreMutatorHandle(t *testing.T) {
 	t.Run("namespace gate disables globally enabled checkpoint mutation", func(t *testing.T) {
 		disabledMutator := NewPodCheckpointRestoreMutator(
 			mutator.client,
-			&configv1alpha1.OperatorConfiguration{Checkpoint: configv1alpha1.CheckpointConfiguration{Enabled: true}},
+			configv1alpha1.CheckpointStorageConfiguration{},
+			"",
 			features.NewResolver(features.Gates{Checkpoint: true}, func(namespace string) (string, bool) {
 				if namespace == "default" {
 					return `{"checkpoint":false}`, true
