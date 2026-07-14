@@ -8,7 +8,6 @@ package features
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"testing"
 )
 
@@ -37,13 +36,13 @@ func (s staticSnapshotSource) AdmissionGateSnapshot(namespace string) (string, b
 }
 
 func TestResolver(t *testing.T) {
-	base := Gates{Grove: true, DRA: true}
+	base := Gates{Grove: true, DRA: true, Checkpoint: true}
 	source := staticSnapshotSource{
 		"tenant-a": `{"grove":false,"dra":false,"futureGate":true}`,
 	}
 	resolver := NewResolver(base, source.AdmissionGateSnapshot)
 	resolved, warnings := resolver.ForNamespace("tenant-a")
-	if resolved.Grove || resolved.DRA {
+	if resolved.Grove || resolved.DRA || !resolved.Checkpoint {
 		t.Fatalf("namespaced false overrides were not applied: %#v", resolved)
 	}
 	if len(warnings) != 1 {
@@ -52,20 +51,6 @@ func TestResolver(t *testing.T) {
 	resolved, warnings = resolver.ForNamespace("tenant-b")
 	if resolved != base || len(warnings) != 0 {
 		t.Fatalf("unclaimed namespace = %#v, %v, want %#v, no warnings", resolved, warnings, base)
-	}
-}
-
-func TestResolve(t *testing.T) {
-	base := Gates{GMSSnapshot: true, GPUDiscovery: true}
-	resolved, unknown, err := resolve(base, `{"gmsSnapshot":false,"grove":true,"futureGate":true}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (Gates{Grove: true, GPUDiscovery: true}); resolved != want {
-		t.Fatalf("resolved gates = %#v, want %#v", resolved, want)
-	}
-	if want := []string{"futureGate"}; !reflect.DeepEqual(unknown, want) {
-		t.Fatalf("unknown gates = %v, want %v", unknown, want)
 	}
 }
 

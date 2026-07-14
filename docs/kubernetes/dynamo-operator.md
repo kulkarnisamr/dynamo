@@ -30,11 +30,13 @@ Dynamo operator is a Kubernetes operator that simplifies the deployment, configu
 
 ## Deployment Modes
 
-The Dynamo operator has one supported production mode and one development/test configuration.
+The Dynamo operator has one supported production mode and one development/test mode.
 
 ### Cluster-Wide Mode
 
 The operator monitors and manages DynamoGraph resources across **all namespaces** in the cluster.
+It owns the cluster-wide Custom Resource Definitions (CRDs), conversion webhook, and conversion
+certificate authority (CA). Deploy exactly one cluster-wide operator per cluster.
 
 **When to Use:**
 
@@ -42,44 +44,37 @@ The operator monitors and manages DynamoGraph resources across **all namespaces*
 - You want centralized management of all Dynamo workloads
 - Standard production deployment on a dedicated cluster
 
-### Cluster-Wide Plus Namespaced Mode
+### Namespace-Restricted Mode
 
 > [!WARNING]
-> Namespaced mode is only for development and testing. It is not supported for production.
-> Use a single cluster-wide operator in production.
+> Namespace-restricted mode is only for development and testing. It is not supported for production.
 
-A cluster-wide operator owns the Custom Resource Definitions (CRDs), conversion, defaulting,
-mutation, and validation. A namespaced operator serves no webhooks and reconciles only its target
-namespace. Its Lease claim makes the cluster-wide reconcilers stand down there and publishes its
-effective feature gates.
+A namespace-restricted operator reconciles only its target namespace and serves no webhooks. It
+creates a Lease that makes the cluster-wide operator skip reconciliation in that namespace and
+provides its feature gates to global admission.
 
-**When to Use:**
-
-- Testing new operator versions in isolated namespaces on a development cluster
-- Developing or testing controller feature gates in one namespace
+Use this mode to test controller changes or feature settings in one namespace on a development
+cluster. It is not a multi-tenancy boundary.
 
 **How It Works:**
 
-1. A namespaced operator creates a Lease named `dynamo-operator-namespace-scope` in its namespace.
-2. The cluster-wide operator watches for these Leases across all namespaces.
-3. Cluster-wide reconcilers hold requests for any namespace with an active Lease.
-4. Cluster-wide admission applies the feature-gate snapshot from that namespace's Lease,
-   including validation and feature-dependent mutating admission such as defaulting.
-5. A successor renews the Lease during leader handoff. Otherwise, the Lease expires and
-   cluster-wide reconciliation resumes.
+1. The namespace-restricted operator creates a Lease named `dynamo-operator-namespace-scope`.
+2. The cluster-wide operator watches these Leases and skips reconciliation in the claimed namespace.
+3. The cluster-wide operator remains the only owner of CRDs and all webhooks.
+4. Global admission uses the feature-gate snapshot from the Lease for the claimed namespace.
+5. If no successor renews the Lease, it expires and cluster-wide reconciliation resumes.
 
 > [!CAUTION]
-> Always pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false` when installing a
-> namespaced operator. Helm installs the chart's `crds/` directory before it renders templates, so
-> the chart cannot detect a missing `--skip-crds` flag.
+> Pass `--skip-crds` and set `dynamo-operator.upgradeCRD=false`. Helm installs the chart's `crds/`
+> directory before rendering templates, so the chart cannot detect a missing `--skip-crds` flag.
 
 ```bash
-# 1. Install the cluster-wide operator in a development cluster
+# Install the cluster-wide operator first
 helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace dynamo-system \
   --create-namespace
 
-# 2. Install a namespaced operator (testing, v2.0.0-beta)
+# Install a namespace-restricted operator for development or testing
 helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --namespace test-namespace \
   --create-namespace \
@@ -89,16 +84,16 @@ helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.controllerManager.manager.image.tag=v2.0.0-beta
 ```
 
-Set `dynamo-operator.namespaceRestriction.targetNamespace` when the reconciliation target differs
-from the Helm release namespace.
+Set `dynamo-operator.namespaceRestriction.targetNamespace` when the target differs from the Helm
+release namespace.
 
 Install every operator Helm release in a separate namespace. Multiple Dynamo operator releases in
 the same Helm release namespace are not supported.
 
-Every released namespaced operator requires a cluster-wide operator of the same or a newer
-version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not
-supported with a 1.2 cluster-wide operator. For controller development, newer namespaced
-code may run if it remains compatible with the cluster-wide CRDs and global webhooks.
+Run the same operator version in parallel whenever possible. The cluster-wide operator must be the
+same version or newer and provide the newest APIs in the cluster. A 1.3 namespaced operator is not
+supported with a 1.2 cluster-wide operator. Newer namespaced controller code can be used for
+development when it remains compatible with the cluster-wide CRDs and webhooks.
 
 The Lease remains during leader handoff so a successor can renew it. If no successor takes over,
 the Lease expires after `namespaceRestriction.lease.duration` and cluster-wide reconciliation
@@ -204,7 +199,8 @@ helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz --namespace 
 ```
 
 > [!NOTE]
-> Namespaced configurations are only for development and testing and are not supported for production. See [Deployment Modes](#deployment-modes).
+> Namespace-restricted mode is only for development and testing. Use cluster-wide mode for
+> production deployments.
 
 ### Building from Source
 

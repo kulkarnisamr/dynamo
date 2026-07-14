@@ -208,18 +208,23 @@ func GetKubeDiscoveryMode(annotations map[string]string) configv1alpha1.KubeDisc
 }
 
 // EphemeralDeploymentEventFilter returns a predicate that filters events based on namespace configuration.
-func EphemeralDeploymentEventFilter(config *configv1alpha1.OperatorConfiguration, _ *RuntimeConfig) predicate.Predicate {
+func EphemeralDeploymentEventFilter(config *configv1alpha1.OperatorConfiguration, runtimeConfig *RuntimeConfig) predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
-		return NamespaceAllowed(config, o.GetNamespace())
+		return NamespaceAllowed(config, runtimeConfig, o, o.GetNamespace())
 	})
 }
 
 // NamespaceAllowed reports whether the operator should process an event whose logical namespace is
-// namespace. Callers filtering cluster-scoped resources pass the namespace of the namespaced object
-// the event acts for, such as a PodSnapshotContent's bound PodSnapshot.
-func NamespaceAllowed(config *configv1alpha1.OperatorConfiguration, namespace string) bool {
+// namespace, applying restricted-namespace and ephemeral filtering. Callers filtering cluster-scoped
+// resources pass the namespace of the namespaced object the event acts for (e.g. a
+// PodSnapshotContent's bound PodSnapshot); o is retained for compatibility with existing callers.
+func NamespaceAllowed(config *configv1alpha1.OperatorConfiguration, _ *RuntimeConfig, _ client.Object, namespace string) bool {
 	if config.Namespace.Restricted != "" {
+		// in case of a restricted namespace, we only want to process the events that are in the restricted namespace
 		return namespace == config.Namespace.Restricted
 	}
+
+	// Namespace ownership is enforced at reconciliation time so queued requests resume after the
+	// development-and-testing Lease expires; otherwise discard events destined to ephemeral deployments.
 	return !strings.Contains(namespace, "ephemeral")
 }

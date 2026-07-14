@@ -18,28 +18,51 @@
 package controller_common
 
 import (
+	"slices"
 	"testing"
 
-	configv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/config/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/event"
+
+	configv1alpha1 "github.com/ai-dynamo/dynamo/deploy/operator/api/config/v1alpha1"
 )
 
-type excludedNamespaces map[string]bool
+// stubExcludedNamespaces implements ExcludedNamespacesInterface over a fixed list.
+type stubExcludedNamespaces []string
 
-func (e excludedNamespaces) Contains(namespace string) bool {
-	return e[namespace]
+// Contains reports whether namespace is in the stubbed exclusion list.
+func (s stubExcludedNamespaces) Contains(namespace string) bool {
+	return slices.Contains(s, namespace)
 }
 
-func TestEphemeralDeploymentEventFilterKeepsExcludedNamespaceEvents(t *testing.T) {
-	config := &configv1alpha1.OperatorConfiguration{}
-	runtimeConfig := &RuntimeConfig{ExcludedNamespaces: excludedNamespaces{"tenant-a": true}}
-	filter := EphemeralDeploymentEventFilter(config, runtimeConfig)
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-a", Name: "object"}}
+func TestNamespaceAllowed(t *testing.T) {
+	tests := []struct {
+		name       string
+		restricted string
+		excluded   []string
+		namespace  string
+		want       bool
+	}{
+		{name: "restricted mode admits matching namespace", restricted: "prod", namespace: "prod", want: true},
+		{name: "restricted mode drops mismatched namespace", restricted: "prod", namespace: "other", want: false},
+		{name: "restricted mode drops empty namespace", restricted: "prod", namespace: "", want: false},
+		{name: "cluster-wide queues excluded namespace", excluded: []string{"banned"}, namespace: "banned", want: true},
+		{name: "cluster-wide drops ephemeral namespace", namespace: "ci-ephemeral-1", want: false},
+		{name: "cluster-wide admits normal namespace", namespace: "prod", want: true},
+	}
 
-	if !filter.Create(event.CreateEvent{Object: pod}) {
-		t.Fatal("expected event to be queued so the reconciliation wrapper can requeue it while the lease is active")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &configv1alpha1.OperatorConfiguration{}
+			config.Namespace.Restricted = tt.restricted
+			runtimeConfig := &RuntimeConfig{}
+			if tt.excluded != nil {
+				runtimeConfig.ExcludedNamespaces = stubExcludedNamespaces(tt.excluded)
+			}
+			got := NamespaceAllowed(config, runtimeConfig, &corev1.Pod{}, tt.namespace)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 

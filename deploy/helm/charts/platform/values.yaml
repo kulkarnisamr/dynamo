@@ -80,17 +80,17 @@ dynamo-operator:
 
   # -- URL for the Model Express server if not deployed by this helm chart. This is ignored if Model Express server is installed by this helm chart (global.model-express.enabled is true).
   modelExpressURL: ""
-  # -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode (the default) for production deployments.
+  # -- DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode for production deployments.
   namespaceRestriction:
     # -- DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production.
     enabled: false
-    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace.
+    # -- DEVELOPMENT AND TESTING ONLY: Target namespace. Defaults to the Helm release namespace.
     targetNamespace:
-    # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode.
+    # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease settings.
     lease:
-      # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease duration.
+      # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease duration.
       duration: 30s
-      # -- DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease renewal interval.
+      # -- DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease renewal interval.
       renewInterval: 10s
 
   # -- DEVELOPMENT AND TESTING ONLY: GPU discovery settings for namespace-restricted operators.

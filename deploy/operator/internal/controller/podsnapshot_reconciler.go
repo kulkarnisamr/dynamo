@@ -408,13 +408,13 @@ func (sr *PodSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // podSnapshotContentEventFilter admits PodSnapshotContent events by the namespace of the bound
 // PodSnapshot (spec.podSnapshotRef.namespace).
-func podSnapshotContentEventFilter(config *configv1alpha1.OperatorConfiguration, _ *commonController.RuntimeConfig) predicate.Predicate {
+func podSnapshotContentEventFilter(config *configv1alpha1.OperatorConfiguration, runtimeConfig *commonController.RuntimeConfig) predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		content, ok := o.(*nvidiacomv1alpha1.PodSnapshotContent)
 		if !ok {
 			return false
 		}
-		return commonController.NamespaceAllowed(config, content.Spec.PodSnapshotRef.Namespace)
+		return commonController.NamespaceAllowed(config, runtimeConfig, o, content.Spec.PodSnapshotRef.Namespace)
 	})
 }
 

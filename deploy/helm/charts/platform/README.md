@@ -43,43 +43,42 @@ The Dynamo Platform Helm chart deploys the complete Dynamo Kubernetes Platform i
 
 ### Webhooks are now mandatory (v1.0.0+)
 
-The `webhook.enabled` Helm value has been removed. Admission and conversion webhooks are
-required and cannot be disabled on the cluster-wide operator. Namespaced operators serve
-no webhooks. Conversion, defaulting, mutation, and validation always use the cluster-wide
-operator's implementation.
+The `webhook.enabled` Helm value has been removed. Admission webhooks are required on the
+cluster-wide operator and cannot be disabled. Namespaced operators serve no webhooks;
+conversion, defaulting, mutation, and validation remain cluster-wide.
 
 No action is required for most upgrades — the operator's built-in cert-controller automatically generates and rotates TLS certificates at startup. If you use cert-manager or externally managed certificates, ensure your existing configuration is correct before upgrading.
 
 ---
 
-## ⚠️ Cluster-Wide and Namespaced Operators
+## ⚠️ DEVELOPMENT AND TESTING ONLY: Namespace-Restricted Deployment
 
-Exactly one cluster-wide Dynamo operator must own the cluster-wide API. It installs or
-updates the CRDs and owns global conversion, defaulting, mutation, and validation.
-Multiple cluster-wide installations are rejected.
+Deploy one cluster-wide operator per cluster. It owns the Custom Resource Definitions (CRDs),
+conversion webhook, and conversion certificate authority (CA).
 
-### DEVELOPMENT AND TESTING ONLY: Namespaced Installation
-
-> Namespace-restricted mode is not supported for production.
+> [!WARNING]
+> Namespace-restricted mode is only for development and testing. It is not supported for production.
 >
-> **CRITICAL: Always pass `--skip-crds` and set `upgradeCRD=false`.** Helm processes a
-> chart's `crds/` directory before rendering templates, so the chart cannot validate or
-> infer `--skip-crds`. Omitting it can install cluster-wide CRDs from the namespaced
-> release. The chart rejects namespaced installations with `upgradeCRD=true`, but it
-> cannot detect a missing `--skip-crds` flag.
+> Always pass `--skip-crds`. Helm processes the chart's `crds/` directory before rendering
+> templates, so the chart cannot detect a missing flag.
 
-```shell
-helm install tenant-dynamo . \
-  --namespace my-tenant-namespace \
+A namespace-restricted operator reconciles only its target namespace and serves no webhooks. Its
+Lease makes the cluster-wide reconcilers skip that namespace and provides feature gates to global
+admission. Install it alongside an existing cluster-wide operator with CRD management disabled:
+
+```bash
+helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
+  --namespace test-namespace \
   --create-namespace \
   --skip-crds \
   --set dynamo-operator.namespaceRestriction.enabled=true \
   --set dynamo-operator.upgradeCRD=false
 ```
 
-The namespaced operator serves no webhooks and requires a cluster-wide operator of the same or a
-newer version. See the [Dynamo operator deployment modes](https://github.com/ai-dynamo/dynamo/blob/main/docs/kubernetes/dynamo-operator.md)
-for ownership, feature-gate, version compatibility, and Lease lifecycle details.
+The cluster-wide operator should run the same or a newer version and provide the newest APIs in the
+cluster. A newer namespaced controller can be used for development when it remains compatible with
+the installed CRDs. Helm rejects namespace-restricted installations with `upgradeCRD=true` and
+rejects custom `webhook.namespaceSelector` values.
 
 ## 🔧 Configuration
 
@@ -111,12 +110,12 @@ Kubernetes: `>=1.30.0-0`
 | dynamo-operator.natsAddr | string | `""` | NATS server address for operator communication (leave empty to use the bundled NATS chart). Format: `nats://hostname:4222` |
 | dynamo-operator.etcdAddr | string | `""` | etcd server address for an external etcd instance. Only needed when using external etcd without the bundled subchart. Format: `http://hostname:2379` or `https://hostname:2379` |
 | dynamo-operator.modelExpressURL | string | `""` | URL for the Model Express server if not deployed by this helm chart. This is ignored if Model Express server is installed by this helm chart (global.model-express.enabled is true). |
-| dynamo-operator.namespaceRestriction | object | `{"enabled":false,"lease":{"duration":"30s","renewInterval":"10s"},"targetNamespace":null}` | DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode (the default) for production deployments. |
+| dynamo-operator.namespaceRestriction | object | `{"enabled":false,"lease":{"duration":"30s","renewInterval":"10s"},"targetNamespace":null}` | DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production. Use cluster-wide mode for production deployments. |
 | dynamo-operator.namespaceRestriction.enabled | bool | `false` | DEVELOPMENT AND TESTING ONLY: Enable namespace-restricted reconciliation. Not supported for production. |
-| dynamo-operator.namespaceRestriction.targetNamespace | string | `nil` | DEVELOPMENT AND TESTING ONLY: Reconciliation target for namespace-restricted mode. Defaults to the release namespace. |
-| dynamo-operator.namespaceRestriction.lease | object | `{"duration":"30s","renewInterval":"10s"}` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership claim settings for namespace-restricted mode. |
-| dynamo-operator.namespaceRestriction.lease.duration | string | `"30s"` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease duration. |
-| dynamo-operator.namespaceRestriction.lease.renewInterval | string | `"10s"` | DEVELOPMENT AND TESTING ONLY: Reconciliation ownership lease renewal interval. |
+| dynamo-operator.namespaceRestriction.targetNamespace | string | `nil` | DEVELOPMENT AND TESTING ONLY: Target namespace. Defaults to the Helm release namespace. |
+| dynamo-operator.namespaceRestriction.lease | object | `{"duration":"30s","renewInterval":"10s"}` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease settings. |
+| dynamo-operator.namespaceRestriction.lease.duration | string | `"30s"` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease duration. |
+| dynamo-operator.namespaceRestriction.lease.renewInterval | string | `"10s"` | DEVELOPMENT AND TESTING ONLY: Namespace ownership Lease renewal interval. |
 | dynamo-operator.gpuDiscovery | object | `{"enabled":true}` | DEVELOPMENT AND TESTING ONLY: GPU discovery settings for namespace-restricted operators. |
 | dynamo-operator.gpuDiscovery.enabled | bool | `true` | DEVELOPMENT AND TESTING ONLY: Enable GPU discovery in namespace-restricted mode. |
 | dynamo-operator.controllerManager.tolerations | list | `[]` | Node tolerations for controller manager pods |

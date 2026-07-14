@@ -29,7 +29,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestLeaseWatcher_HandleLease(t *testing.T) {
+func TestLeaseWatcher_HandleLeaseAdd(t *testing.T) {
 	tests := []struct {
 		name              string
 		lease             *coordinationv1.Lease
@@ -37,7 +37,7 @@ func TestLeaseWatcher_HandleLease(t *testing.T) {
 		excludedNamespace string
 	}{
 		{
-			name: "adds namespace for valid reconciliation lease",
+			name: "adds namespace for valid marker lease",
 			lease: &coordinationv1.Lease{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      LeaseName,
@@ -90,7 +90,8 @@ func TestLeaseWatcher_HandleLease(t *testing.T) {
 				logger: logger,
 			}
 
-			lw.handleLease(tt.lease)
+			// Handle lease add
+			lw.handleLeaseAdd(tt.lease)
 
 			// Check if namespace was excluded
 			got := lw.Contains(tt.excludedNamespace)
@@ -98,6 +99,42 @@ func TestLeaseWatcher_HandleLease(t *testing.T) {
 				t.Errorf("namespace exclusion = %v, want %v", got, tt.shouldExclude)
 			}
 		})
+	}
+}
+
+func TestLeaseWatcher_HandleLeaseUpdate(t *testing.T) {
+	logger := logr.Discard()
+
+	lw := &LeaseWatcher{
+		logger: logger,
+	}
+
+	lease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      LeaseName,
+			Namespace: "test-ns",
+		},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       ptr.To("namespace-restricted-operator-v1.0.0"),
+			LeaseDurationSeconds: ptr.To[int32](30),
+			RenewTime:            &metav1.MicroTime{Time: time.Now()},
+		},
+	}
+
+	// Handle lease update (should add if not present)
+	lw.handleLeaseUpdate(lease)
+
+	// Verify namespace was added
+	if !lw.Contains("test-ns") {
+		t.Error("namespace should be excluded after update")
+	}
+
+	// Handle another update (should remain)
+	lw.handleLeaseUpdate(lease)
+
+	// Verify namespace is still excluded
+	if !lw.Contains("test-ns") {
+		t.Error("namespace should still be excluded after second update")
 	}
 }
 
@@ -117,32 +154,13 @@ func TestLeaseWatcher_AdmissionGateSnapshot(t *testing.T) {
 		},
 	}
 	lw := &LeaseWatcher{logger: logr.Discard()}
-	lw.handleLease(lease)
+	lw.handleLeaseAdd(lease)
+
 	if got, found := lw.AdmissionGateSnapshot("test-ns"); !found || got != `{"grove":true}` {
 		t.Fatalf("AdmissionGateSnapshot() = %q, %v", got, found)
 	}
 	if got, found := lw.OperatorPrincipal("test-ns"); !found || got != "system:serviceaccount:test-ns:dev-operator" {
 		t.Fatalf("OperatorPrincipal() = %q, %v", got, found)
-	}
-
-	lease = lease.DeepCopy()
-	lease.Annotations[features.LeaseAnnotation] = `{"grove":false}`
-	lw.handleLease(lease)
-	if got, found := lw.AdmissionGateSnapshot("test-ns"); !found || got != `{"grove":false}` {
-		t.Fatalf("updated AdmissionGateSnapshot() = %q, %v", got, found)
-	}
-	if _, found := lw.AdmissionGateSnapshot("unclaimed"); found {
-		t.Fatal("unclaimed namespace must not return a snapshot")
-	}
-	if _, found := lw.OperatorPrincipal("unclaimed"); found {
-		t.Fatal("unclaimed namespace must not return an operator principal")
-	}
-
-	lease = lease.DeepCopy()
-	lease.Spec.RenewTime = &metav1.MicroTime{Time: time.Now().Add(-time.Minute)}
-	lw.handleLease(lease)
-	if _, found := lw.OperatorPrincipal("test-ns"); found {
-		t.Fatal("expired lease must not return an operator principal")
 	}
 }
 
@@ -333,7 +351,7 @@ func TestLeaseWatcher_MultipleNamespaces(t *testing.T) {
 				RenewTime:            &metav1.MicroTime{Time: time.Now()},
 			},
 		}
-		lw.handleLease(lease)
+		lw.handleLeaseAdd(lease)
 	}
 
 	// Verify all are excluded

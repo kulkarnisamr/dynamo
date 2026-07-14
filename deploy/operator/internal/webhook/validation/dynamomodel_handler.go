@@ -120,7 +120,9 @@ func (h *DynamoModelHandler) ValidateDelete(ctx context.Context, obj runtime.Obj
 }
 
 // RegisterWithManager registers the webhook with the manager.
+// The handler is automatically wrapped with FeatureAwareValidator to resolve namespace gates.
 func (h *DynamoModelHandler) RegisterWithManager(mgr manager.Manager) error {
+	// Wrap the handler with namespace-aware feature resolution.
 	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.FeatureResolver())
 
 	// Wrap with metrics collection

@@ -39,20 +39,6 @@ const (
 )
 
 func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
-	existingLease := func() *coordinationv1.Lease {
-		return &coordinationv1.Lease{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      LeaseName,
-				Namespace: testNamespace,
-			},
-			Spec: coordinationv1.LeaseSpec{
-				HolderIdentity:       ptr.To("old-holder"),
-				LeaseDurationSeconds: ptr.To[int32](60),
-				AcquireTime:          &metav1.MicroTime{Time: time.Now().Add(-2 * time.Minute)},
-				RenewTime:            &metav1.MicroTime{Time: time.Now().Add(-1 * time.Minute)},
-			},
-		}
-	}
 	tests := []struct {
 		name            string
 		namespace       string
@@ -60,22 +46,35 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 		existingLease   *coordinationv1.Lease
 	}{
 		{
-			name:            "creates lease with admission gates",
+			name:            "creates lease when it doesn't exist",
 			namespace:       testNamespace,
 			operatorVersion: testOperatorVersion,
+			existingLease:   nil,
 		},
 		{
-			name:            "updates legacy lease with admission gates",
+			name:            "updates existing lease",
 			namespace:       testNamespace,
 			operatorVersion: testOperatorVersion,
-			existingLease:   existingLease(),
+			existingLease: &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      LeaseName,
+					Namespace: testNamespace,
+				},
+				Spec: coordinationv1.LeaseSpec{
+					HolderIdentity:       ptr.To("old-holder"),
+					LeaseDurationSeconds: ptr.To[int32](60),
+					AcquireTime:          &metav1.MicroTime{Time: time.Now().Add(-2 * time.Minute)},
+					RenewTime:            &metav1.MicroTime{Time: time.Now().Add(-1 * time.Minute)},
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			const admissionGatesJSON = `{"gmsSnapshot":true,"checkpoint":false}`
+			const admissionGatesJSON = `{"grove":false}`
 			const operatorPrincipal = "system:serviceaccount:test-ns:dynamo-operator"
+
 			// Create fake client with or without existing lease
 			var client *fake.Clientset
 			if tt.existingLease != nil {
@@ -86,11 +85,14 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 
 			// Create lease manager
 			lm := &LeaseManager{
-				client:             client,
-				namespace:          tt.namespace,
-				leaseDuration:      30 * time.Second,
-				renewInterval:      10 * time.Second,
-				holderIdentity:     "namespace-restricted-operator-" + tt.operatorVersion,
+				client:          client,
+				namespace:       tt.namespace,
+				leaseDuration:   30 * time.Second,
+				renewInterval:   10 * time.Second,
+				holderIdentity:  "namespace-restricted-operator-" + tt.operatorVersion,
+				operatorVersion: tt.operatorVersion,
+				stopCh:          make(chan struct{}),
+
 				admissionGatesJSON: admissionGatesJSON,
 				operatorPrincipal:  operatorPrincipal,
 			}
@@ -141,30 +143,98 @@ func TestLeaseManager_CreateOrUpdateLease(t *testing.T) {
 				t.Errorf("operator principal = %q, want %q", got, operatorPrincipal)
 			}
 
-			// Every active lease needs a RenewTime so the cluster-wide watcher
-			// excludes the namespace immediately after initial creation.
 			if lease.Spec.RenewTime == nil {
-				t.Error("lease renew time should be set")
-			} else if tt.existingLease != nil && !lease.Spec.RenewTime.After(tt.existingLease.Spec.RenewTime.Time) {
-				t.Error("renew time was not updated")
+				t.Fatal("lease renew time should be set")
 			}
-
-			// Updates preserve the original acquisition time.
-			if tt.existingLease != nil && tt.existingLease.Spec.AcquireTime != nil {
+			if tt.existingLease != nil {
+				if !lease.Spec.RenewTime.After(tt.existingLease.Spec.RenewTime.Time) {
+					t.Error("renew time was not updated")
+				}
 				if lease.Spec.AcquireTime == nil {
 					t.Error("acquire time should be preserved on update")
 				} else if !lease.Spec.AcquireTime.Equal(tt.existingLease.Spec.AcquireTime) {
 					t.Error("acquire time should not change on update")
 				}
-			}
-			if lease.Spec.AcquireTime == nil {
-				t.Error("lease acquire time should be set")
+			} else {
+				if lease.Spec.AcquireTime == nil {
+					t.Error("lease acquire time should be set on initial creation")
+				} else if !lease.Spec.RenewTime.Equal(lease.Spec.AcquireTime) {
+					t.Error("initial renew time should match acquire time")
+				}
 			}
 		})
 	}
 }
 
-func TestLeaseManager_StartLeavesLeaseForLeaderHandoff(t *testing.T) {
+func TestLeaseManager_Stop(t *testing.T) {
+	namespace := testNamespace
+	operatorVersion := testOperatorVersion
+
+	// Create fake client with existing lease
+	existingLease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      LeaseName,
+			Namespace: namespace,
+		},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       ptr.To("namespace-restricted-operator-v1.0.0"),
+			LeaseDurationSeconds: ptr.To[int32](30),
+		},
+	}
+	client := fake.NewSimpleClientset(existingLease)
+
+	// Create lease manager
+	lm := &LeaseManager{
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   30 * time.Second,
+		renewInterval:   10 * time.Second,
+		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
+	}
+
+	// Stop lease manager
+	ctx := context.Background()
+	err := lm.Stop(ctx)
+	if err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	// Verify lease was deleted
+	_, err = client.CoordinationV1().Leases(namespace).Get(ctx, LeaseName, metav1.GetOptions{})
+	if err == nil {
+		t.Error("expected lease to be deleted, but it still exists")
+	}
+}
+
+func TestLeaseManager_Stop_LeaseAlreadyDeleted(t *testing.T) {
+	namespace := testNamespace
+	operatorVersion := testOperatorVersion
+
+	// Create fake client WITHOUT existing lease (simulating already deleted/expired)
+	client := fake.NewSimpleClientset()
+
+	// Create lease manager
+	lm := &LeaseManager{
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   30 * time.Second,
+		renewInterval:   10 * time.Second,
+		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
+	}
+
+	// Stop lease manager - should succeed even though lease doesn't exist
+	ctx := context.Background()
+	err := lm.Stop(ctx)
+	if err != nil {
+		t.Fatalf("Stop() should succeed when lease is already deleted, got error = %v", err)
+	}
+}
+
+func TestLeaseManager_StartAndStop_CompleteLifecycle(t *testing.T) {
 	namespace := testNamespace
 	operatorVersion := testOperatorVersion
 
@@ -173,44 +243,31 @@ func TestLeaseManager_StartLeavesLeaseForLeaderHandoff(t *testing.T) {
 
 	// Create lease manager with short intervals for testing
 	lm := &LeaseManager{
-		client:         client,
-		namespace:      namespace,
-		leaseDuration:  30 * time.Second,
-		renewInterval:  50 * time.Millisecond,
-		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
-		maxFailures:    3,
-	}
-	if !lm.NeedLeaderElection() {
-		t.Fatal("LeaseManager must only run on the elected leader")
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   30 * time.Second,
+		renewInterval:   50 * time.Millisecond,
+		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- lm.Start(ctx)
-	}()
-
-	var lease *coordinationv1.Lease
-	found := false
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		var err error
-		lease, err = client.CoordinationV1().Leases(namespace).Get(ctx, LeaseName, metav1.GetOptions{})
-		if err == nil {
-			found = true
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Start the lease manager
+	ctx := context.Background()
+	err := lm.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
 	}
-	if !found {
-		t.Fatal("lease was not created")
+
+	// Verify lease was created
+	lease, err := client.CoordinationV1().Leases(namespace).Get(ctx, LeaseName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get lease after Start(): %v", err)
 	}
 	if lease.Name != LeaseName {
 		t.Errorf("lease name = %v, want %v", lease.Name, LeaseName)
 	}
 
-	// The watcher requires RenewTime immediately so it excludes the namespace
-	// before the first periodic renewal.
 	if lease.Spec.RenewTime == nil {
 		t.Fatal("initial lease should have renew time set on creation")
 	}
@@ -218,7 +275,7 @@ func TestLeaseManager_StartLeavesLeaseForLeaderHandoff(t *testing.T) {
 
 	// Poll for renewal with timeout (more robust than fixed sleep)
 	renewalDetected := false
-	deadline = time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		updatedLease, err := client.CoordinationV1().Leases(namespace).Get(ctx, LeaseName, metav1.GetOptions{})
 		if err == nil && updatedLease.Spec.RenewTime != nil && updatedLease.Spec.RenewTime.After(initialRenewTime) {
@@ -231,6 +288,56 @@ func TestLeaseManager_StartLeavesLeaseForLeaderHandoff(t *testing.T) {
 		t.Error("lease should have renew time set after renewal")
 	}
 
+	// Stop the lease manager (should delete the lease and stop renewal loop)
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = lm.Stop(stopCtx)
+	if err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	// Verify lease was deleted
+	_, err = client.CoordinationV1().Leases(namespace).Get(ctx, LeaseName, metav1.GetOptions{})
+	if err == nil {
+		t.Error("lease should be deleted after Stop()")
+	}
+}
+
+func TestLeaderElectedLeaseManagerLeavesLeaseForHandoff(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	lm := &LeaseManager{
+		client:         client,
+		namespace:      testNamespace,
+		leaseDuration:  30 * time.Second,
+		renewInterval:  50 * time.Millisecond,
+		holderIdentity: "namespace-restricted-operator-" + testOperatorVersion,
+		stopCh:         make(chan struct{}),
+		maxFailures:    3,
+	}
+	runnable := WithLeaderElection(lm)
+	leaderRunnable, ok := runnable.(interface{ NeedLeaderElection() bool })
+	if !ok || !leaderRunnable.NeedLeaderElection() {
+		t.Fatal("lease manager must run only on the elected leader")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runnable.Start(ctx)
+	}()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if _, err := client.CoordinationV1().Leases(testNamespace).Get(ctx, LeaseName, metav1.GetOptions{}); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("lease was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	cancel()
 	select {
 	case err := <-done:
@@ -238,18 +345,18 @@ func TestLeaseManager_StartLeavesLeaseForLeaderHandoff(t *testing.T) {
 			t.Fatalf("Start() error = %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("LeaseManager did not stop after context cancellation")
+		t.Fatal("lease manager did not stop after context cancellation")
 	}
 
-	if _, err := client.CoordinationV1().Leases(namespace).Get(context.Background(), LeaseName, metav1.GetOptions{}); err != nil {
+	if _, err := client.CoordinationV1().Leases(testNamespace).Get(context.Background(), LeaseName, metav1.GetOptions{}); err != nil {
 		t.Fatalf("lease must remain for leader handoff: %v", err)
 	}
 }
 
-// TestLeaseManager_FailureTracking_ReturnsErrorOnMaxFailures verifies that consecutive
-// lease renewal failures stop the manager to prevent split-brain scenarios.
+// TestLeaseManager_FailureTracking_SendsErrorOnMaxFailures verifies that consecutive
+// lease renewal failures trigger a fatal error to prevent split-brain scenarios.
 // Note: This test calls renewalLoop() directly (not Start()) to inject failures via reactor.
-func TestLeaseManager_FailureTracking_ReturnsErrorOnMaxFailures(t *testing.T) {
+func TestLeaseManager_FailureTracking_SendsErrorOnMaxFailures(t *testing.T) {
 	namespace := testNamespace
 	operatorVersion := testOperatorVersion
 
@@ -276,24 +383,25 @@ func TestLeaseManager_FailureTracking_ReturnsErrorOnMaxFailures(t *testing.T) {
 
 	// Create lease manager with short intervals for faster test execution
 	lm := &LeaseManager{
-		client:         client,
-		namespace:      namespace,
-		leaseDuration:  30 * time.Second,
-		renewInterval:  10 * time.Millisecond, // Fast for testing
-		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
-		maxFailures:    3,
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   30 * time.Second,
+		renewInterval:   10 * time.Millisecond, // Fast for testing
+		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
+		maxFailures:     3,
+		errCh:           make(chan error, 1),
 	}
 
 	// Start renewal loop - all updates will fail
 	ctx := context.Background()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- lm.renewalLoop(ctx)
-	}()
+	lm.wg.Add(1)
+	go lm.renewalLoop(ctx)
 
 	// Wait for fatal error on channel (with generous timeout)
 	select {
-	case err := <-errCh:
+	case err := <-lm.errCh:
 		if err == nil {
 			t.Fatal("expected error from error channel, got nil")
 		}
@@ -310,6 +418,10 @@ func TestLeaseManager_FailureTracking_ReturnsErrorOnMaxFailures(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for fatal error from lease manager (expected within ~30ms)")
 	}
+
+	// Clean shutdown
+	close(lm.stopCh)
+	lm.wg.Wait()
 }
 
 // TestLeaseManager_FailureTracking_ResetsOnSuccess verifies that the failure counter
@@ -335,32 +447,40 @@ func TestLeaseManager_FailureTracking_ResetsOnSuccess(t *testing.T) {
 
 	// Create lease manager with pre-existing failures
 	lm := &LeaseManager{
-		client:         client,
-		namespace:      namespace,
-		leaseDuration:  30 * time.Second,
-		renewInterval:  20 * time.Millisecond, // Reasonable interval for test
-		holderIdentity: "namespace-restricted-operator-" + operatorVersion,
-		maxFailures:    3,
-		failureCount:   2, // Simulates 2 previous failures
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   30 * time.Second,
+		renewInterval:   20 * time.Millisecond, // Reasonable interval for test
+		holderIdentity:  "namespace-restricted-operator-" + operatorVersion,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
+		maxFailures:     3,
+		errCh:           make(chan error, 1),
+		failureCount:    2, // Simulates 2 previous failures
 	}
 
 	// Start renewal loop (will succeed and reset counter)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- lm.renewalLoop(ctx)
-	}()
+	ctx := context.Background()
+	lm.wg.Add(1)
+	go lm.renewalLoop(ctx)
 
 	// Wait for at least one renewal cycle
 	time.Sleep(50 * time.Millisecond)
 
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("renewalLoop() error = %v", err)
-	}
+	// Stop the loop
+	close(lm.stopCh)
+	lm.wg.Wait()
 
 	// Verify failure count was reset to 0 after successful renewal
 	if lm.failureCount != 0 {
 		t.Errorf("failure count should be reset to 0 after success, got %d", lm.failureCount)
+	}
+
+	// Verify no fatal error was sent
+	select {
+	case err := <-lm.errCh:
+		t.Errorf("unexpected error on channel after successful renewal: %v", err)
+	default:
+		// Expected: no error sent
 	}
 }

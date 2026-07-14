@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
@@ -36,26 +37,29 @@ import (
 )
 
 const (
-	// LeaseName is the well-known name for namespace reconciliation ownership leases.
+	// LeaseName is the well-known name for namespace scope marker leases
 	LeaseName = "dynamo-operator-namespace-scope"
 	// OperatorPrincipalAnnotation stores the namespaced operator's Kubernetes username.
 	OperatorPrincipalAnnotation = "nvidia.com/dynamo-operator-principal"
 )
 
-// LeaseManager maintains reconciliation ownership for namespace-restricted mode.
-// Its Lease also publishes the effective admission gates and operator identity
-// consumed by the cluster-wide operator. All webhooks remain global.
+// LeaseManager maintains the namespace scope marker lease for development/test mode.
 type LeaseManager struct {
-	client             kubernetes.Interface
-	namespace          string
-	leaseDuration      time.Duration
-	renewInterval      time.Duration
-	holderIdentity     string
+	client          kubernetes.Interface
+	namespace       string
+	leaseDuration   time.Duration
+	renewInterval   time.Duration
+	holderIdentity  string
+	operatorVersion string
+	stopCh          chan struct{}
+	errCh           chan error
+	wg              sync.WaitGroup
+	failureCount    int
+	maxFailures     int
+	logger          logr.Logger
+
 	admissionGatesJSON string
 	operatorPrincipal  string
-	failureCount       int
-	maxFailures        int
-	logger             logr.Logger
 }
 
 // NewLeaseManager creates a new lease manager for namespace scope marking
@@ -101,39 +105,45 @@ func NewLeaseManager(
 	if maxFailures < 1 {
 		maxFailures = 1 // Always allow at least 1 failure for transient issues
 	}
+
 	admissionGatesJSON, err := json.Marshal(admissionGates)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode admission feature gates: %w", err)
 	}
 
 	return &LeaseManager{
-		client:             client,
-		namespace:          namespace,
-		leaseDuration:      leaseDuration,
-		renewInterval:      renewInterval,
-		holderIdentity:     holderIdentity,
+		client:          client,
+		namespace:       namespace,
+		leaseDuration:   leaseDuration,
+		renewInterval:   renewInterval,
+		holderIdentity:  holderIdentity,
+		operatorVersion: operatorVersion,
+		stopCh:          make(chan struct{}),
+		maxFailures:     maxFailures,
+
 		admissionGatesJSON: string(admissionGatesJSON),
 		operatorPrincipal:  operatorPrincipal,
-		maxFailures:        maxFailures,
 	}, nil
 }
 
-// NeedLeaderElection makes the manager run only on the active operator leader.
-func (lm *LeaseManager) NeedLeaderElection() bool {
-	return true
+// Errors returns a channel that will receive fatal errors from the lease manager
+// Callers should monitor this channel and take appropriate action (e.g., exit to prevent split-brain)
+func (lm *LeaseManager) Errors() <-chan error {
+	return lm.errCh
 }
 
-// Start creates the Lease and renews it until the manager stops. The Lease is
-// intentionally left to expire so a successor can renew it during leader handoff.
+// Start creates the lease and begins renewal loop
 func (lm *LeaseManager) Start(ctx context.Context) error {
 	lm.logger = log.FromContext(ctx).WithValues("component", "namespace-scope-lease", "namespace", lm.namespace)
 
-	lm.logger.Info("Starting namespace reconciliation lease manager",
+	// Initialize error channel
+	lm.errCh = make(chan error, 1) // buffered to avoid blocking
+
+	lm.logger.Info("Starting namespace scope marker lease manager",
 		"leaseName", LeaseName,
 		"leaseDuration", lm.leaseDuration,
 		"renewInterval", lm.renewInterval,
 		"holderIdentity", lm.holderIdentity,
-		"admissionGates", lm.admissionGatesJSON,
 		"maxFailures", lm.maxFailures)
 
 	// Create or update the lease initially
@@ -141,11 +151,45 @@ func (lm *LeaseManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create initial lease: %w", err)
 	}
 
-	lm.logger.Info("Namespace reconciliation lease created successfully")
-	return lm.renewalLoop(ctx)
+	lm.logger.Info("Namespace scope marker lease created successfully")
+
+	// Start renewal loop in background
+	lm.wg.Add(1)
+	go lm.renewalLoop(ctx)
+
+	return nil
 }
 
-// createOrUpdateLease creates or updates the namespace reconciliation lease.
+// Stop stops the lease renewal loop and releases the lease
+func (lm *LeaseManager) Stop(ctx context.Context) error {
+	lm.logger.Info("Stopping namespace scope marker lease manager")
+
+	// Signal renewal loop to stop
+	close(lm.stopCh)
+
+	// Wait for renewal loop to complete to avoid race condition
+	// where we delete the lease while a renewal is in progress
+	lm.wg.Wait()
+
+	// Delete the lease to signal we're no longer managing this namespace
+	err := lm.client.CoordinationV1().Leases(lm.namespace).Delete(ctx, LeaseName, metav1.DeleteOptions{})
+	if err != nil {
+		// If lease is already deleted (TTL expiry, manual cleanup, etc.), that's fine
+		// The goal is achieved - the lease is gone
+		if k8sErrors.IsNotFound(err) {
+			lm.logger.Info("Namespace scope marker lease already deleted")
+			return nil
+		}
+		// Real failure - return the error
+		lm.logger.Error(err, "Failed to delete lease on shutdown")
+		return err
+	}
+
+	lm.logger.Info("Namespace scope marker lease deleted successfully")
+	return nil
+}
+
+// createOrUpdateLease creates or updates the namespace scope marker lease
 func (lm *LeaseManager) createOrUpdateLease(ctx context.Context) error {
 	now := metav1.NewMicroTime(time.Now())
 	leaseDurationSeconds := int32(lm.leaseDuration.Seconds())
@@ -178,7 +222,7 @@ func (lm *LeaseManager) createOrUpdateLease(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create lease: %w", err)
 		}
-		lm.logger.Info("Created namespace reconciliation lease")
+		lm.logger.Info("Created namespace scope marker lease")
 		return nil
 	}
 
@@ -197,20 +241,25 @@ func (lm *LeaseManager) createOrUpdateLease(ctx context.Context) error {
 		return fmt.Errorf("failed to update lease: %w", err)
 	}
 
-	lm.logger.V(1).Info("Refreshed namespace reconciliation lease")
+	lm.logger.V(1).Info("Refreshed namespace scope marker lease")
 	return nil
 }
 
-// renewalLoop continuously renews the lease until stopped.
-func (lm *LeaseManager) renewalLoop(ctx context.Context) error {
+// renewalLoop continuously renews the lease until stopped
+func (lm *LeaseManager) renewalLoop(ctx context.Context) {
+	defer lm.wg.Done()
+
 	ticker := time.NewTicker(lm.renewInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-lm.stopCh:
+			lm.logger.Info("Lease renewal loop stopped")
+			return
 		case <-ctx.Done():
 			lm.logger.Info("Context cancelled, stopping lease renewal loop")
-			return nil
+			return
 		case <-ticker.C:
 			// Use createOrUpdateLease instead of renewLease for self-healing
 			// If the lease is manually deleted, it will be automatically recreated
@@ -228,11 +277,18 @@ func (lm *LeaseManager) renewalLoop(ctx context.Context) error {
 						"maxFailures", lm.maxFailures)
 				}
 
-				// After max consecutive failures, stop the manager to prevent split-brain.
+				// After max consecutive failures, signal fatal error to prevent split-brain
 				if lm.failureCount >= lm.maxFailures {
 					fatalErr := fmt.Errorf("lease renewal failed %d consecutive times (max: %d), operator must exit to prevent split-brain with cluster-wide operator", lm.failureCount, lm.maxFailures)
 					lm.logger.Error(fatalErr, "FATAL: Max lease renewal failures exceeded")
-					return fatalErr
+
+					// Send error to channel (non-blocking)
+					select {
+					case lm.errCh <- fatalErr:
+					default:
+						// Error already sent, don't block
+					}
+					return
 				}
 			} else {
 				// Success: reset failure counter

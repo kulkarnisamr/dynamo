@@ -127,7 +127,7 @@ dynamo-operator:
     failurePolicy: Fail        # Fail (reject on error) or Ignore (allow on error)
     timeoutSeconds: 10         # Webhook timeout
 
-    # Namespace filtering is unsupported and must remain empty
+    # User-configured namespace filtering is unsupported
     namespaceSelector: {}
 ```
 
@@ -573,7 +573,7 @@ helm upgrade <release> dynamo-platform -n <namespace>
 ### Multi-Tenant Deployments
 
 1. ✅ **Deploy one cluster-wide operator** for platform-wide validation
-2. ✅ **Use namespace-restricted operators only for development or testing**, never as a production tenant-isolation mechanism
+2. Use namespace-restricted operators only for development or testing, never as a production tenant-isolation mechanism
 
 ---
 

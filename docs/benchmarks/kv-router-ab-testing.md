@@ -88,7 +88,8 @@ kubectl create secret generic hf-token-secret \
 Follow the [Dynamo Kubernetes Installation Guide](../kubernetes/installation-guide.md) to install the platform in `dynamo-bench`.
 
 > [!WARNING]
-> Namespace-restricted mode (`namespaceRestriction.enabled=true`) is only for development and testing and is not supported for production. Use cluster-wide mode for production deployments.
+> Namespace-restricted mode (`namespaceRestriction.enabled=true`) is only for development and
+> testing. It is not supported for production.
 
 **Key Configuration Notes:**
 - Adjust version tags to match your cluster's available Dynamo versions

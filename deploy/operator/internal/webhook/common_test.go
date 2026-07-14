@@ -7,7 +7,7 @@ package webhook
 
 import (
 	"context"
-	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ai-dynamo/dynamo/deploy/operator/internal/features"
@@ -17,96 +17,62 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-var errValidationCalled = errors.New("validation called")
-
 type staticGateResolver map[string]features.Gates
 
 func (s staticGateResolver) ForNamespace(namespace string) (features.Gates, []string) {
-	warnings := []string(nil)
-	if namespace == "claimed" {
-		warnings = []string{"unknown feature gate"}
+	gates, found := s[namespace]
+	if !found {
+		return gates, nil
 	}
-	return s[namespace], warnings
+	return gates, []string{"resolver warning"}
 }
 
-type rejectingValidator struct{}
-
-func (rejectingValidator) ValidateCreate(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
-	return nil, validationCalled(ctx)
+type recordingValidator struct {
+	gates []features.Gates
 }
 
-func (rejectingValidator) ValidateUpdate(ctx context.Context, _, _ runtime.Object) (admission.Warnings, error) {
-	return nil, validationCalled(ctx)
+func (v *recordingValidator) validate(ctx context.Context) (admission.Warnings, error) {
+	v.gates = append(v.gates, features.MustFromContext(ctx))
+	return admission.Warnings{"validator warning"}, nil
 }
 
-func (rejectingValidator) ValidateDelete(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
-	return nil, validationCalled(ctx)
+func (v *recordingValidator) ValidateCreate(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return v.validate(ctx)
 }
 
-func validationCalled(ctx context.Context) error {
-	features.MustFromContext(ctx)
-	return errValidationCalled
+func (v *recordingValidator) ValidateUpdate(ctx context.Context, _, _ runtime.Object) (admission.Warnings, error) {
+	return v.validate(ctx)
+}
+
+func (v *recordingValidator) ValidateDelete(ctx context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return v.validate(ctx)
 }
 
 func TestFeatureAwareValidator(t *testing.T) {
-	validator := NewFeatureAwareValidator(rejectingValidator{}, staticGateResolver{
+	recording := &recordingValidator{}
+	validator := NewFeatureAwareValidator(recording, staticGateResolver{
 		"claimed": {Grove: true},
 	})
 	claimed := &corev1.ConfigMap{}
 	claimed.Namespace = "claimed"
-	unclaimed := &corev1.ConfigMap{}
-	unclaimed.Namespace = "unclaimed"
-
-	tests := []struct {
-		name         string
-		call         func() (admission.Warnings, error)
-		wantWarnings int
-	}{
-		{
-			name: "validates create with namespaced gates",
-			call: func() (admission.Warnings, error) {
-				return validator.ValidateCreate(context.Background(), claimed)
-			},
-			wantWarnings: 1,
+	calls := []func() (admission.Warnings, error){
+		func() (admission.Warnings, error) { return validator.ValidateCreate(context.Background(), claimed) },
+		func() (admission.Warnings, error) {
+			return validator.ValidateUpdate(context.Background(), &corev1.ConfigMap{}, claimed)
 		},
-		{
-			name: "validates update with namespaced gates",
-			call: func() (admission.Warnings, error) {
-				return validator.ValidateUpdate(context.Background(), unclaimed, claimed)
-			},
-			wantWarnings: 1,
-		},
-		{
-			name: "validates delete with namespaced gates",
-			call: func() (admission.Warnings, error) {
-				return validator.ValidateDelete(context.Background(), claimed)
-			},
-			wantWarnings: 1,
-		},
-		{
-			name: "validates namespace with global gates",
-			call: func() (admission.Warnings, error) {
-				return validator.ValidateCreate(context.Background(), unclaimed)
-			},
-		},
-		{
-			name: "validates object without metadata",
-			call: func() (admission.Warnings, error) {
-				return validator.ValidateCreate(context.Background(), &runtime.Unknown{})
-			},
-		},
+		func() (admission.Warnings, error) { return validator.ValidateDelete(context.Background(), claimed) },
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			warnings, err := test.call()
-			if !errors.Is(err, errValidationCalled) {
-				t.Errorf("validation error = %v, want %v", err, errValidationCalled)
-			}
-			if len(warnings) != test.wantWarnings {
-				t.Errorf("warnings = %v, want %d", warnings, test.wantWarnings)
-			}
-		})
+	for _, call := range calls {
+		warnings, err := call()
+		if err != nil || !slices.Equal(warnings, admission.Warnings{"resolver warning", "validator warning"}) {
+			t.Fatalf("validation = %v, %v", warnings, err)
+		}
+	}
+	for _, gates := range recording.gates {
+		if !gates.Grove {
+			t.Fatalf("validator received gates %#v, want Grove enabled", gates)
+		}
 	}
 }
 

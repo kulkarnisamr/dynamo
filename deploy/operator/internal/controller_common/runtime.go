@@ -33,7 +33,6 @@ type RuntimeConfig struct {
 	// IstioEnabled is the resolved Istio DestinationRule reconciliation state
 	// after merging config overrides with API auto-detection.
 	IstioEnabled bool
-	// ExcludedNamespaces tracks active reconciliation leases held by namespaced
-	// operator installations.
+	// ExcludedNamespaces for cluster-wide mode namespace filtering
 	ExcludedNamespaces ExcludedNamespacesInterface
 }

@@ -53,10 +53,7 @@ type FeatureAwareValidator struct {
 
 // NewFeatureAwareValidator applies namespace gate overrides while always running
 // the cluster-wide validator.
-func NewFeatureAwareValidator(
-	validator admission.CustomValidator,
-	resolver features.Resolver,
-) admission.CustomValidator {
+func NewFeatureAwareValidator(validator admission.CustomValidator, resolver features.Resolver) admission.CustomValidator {
 	return &FeatureAwareValidator{
 		validator: validator,
 		resolver:  resolver,
@@ -64,40 +61,27 @@ func NewFeatureAwareValidator(
 }
 
 // ValidateCreate implements admission.CustomValidator.
-func (v *FeatureAwareValidator) ValidateCreate(
-	ctx context.Context,
-	obj runtime.Object,
-) (admission.Warnings, error) {
+func (v *FeatureAwareValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	ctx, gateWarnings := v.contextFor(ctx, obj)
 	warnings, err := v.validator.ValidateCreate(ctx, obj)
 	return append(gateWarnings, warnings...), err
 }
 
 // ValidateUpdate implements admission.CustomValidator.
-func (v *FeatureAwareValidator) ValidateUpdate(
-	ctx context.Context,
-	oldObj runtime.Object,
-	newObj runtime.Object,
-) (admission.Warnings, error) {
+func (v *FeatureAwareValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	ctx, gateWarnings := v.contextFor(ctx, newObj)
 	warnings, err := v.validator.ValidateUpdate(ctx, oldObj, newObj)
 	return append(gateWarnings, warnings...), err
 }
 
 // ValidateDelete implements admission.CustomValidator.
-func (v *FeatureAwareValidator) ValidateDelete(
-	ctx context.Context,
-	obj runtime.Object,
-) (admission.Warnings, error) {
+func (v *FeatureAwareValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	ctx, gateWarnings := v.contextFor(ctx, obj)
 	warnings, err := v.validator.ValidateDelete(ctx, obj)
 	return append(gateWarnings, warnings...), err
 }
 
-func (v *FeatureAwareValidator) contextFor(
-	ctx context.Context,
-	obj runtime.Object,
-) (context.Context, admission.Warnings) {
+func (v *FeatureAwareValidator) contextFor(ctx context.Context, obj runtime.Object) (context.Context, admission.Warnings) {
 	if v.resolver == nil {
 		return features.WithGates(ctx, features.Gates{}), nil
 	}

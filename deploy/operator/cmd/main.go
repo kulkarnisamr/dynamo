@@ -278,7 +278,7 @@ func main() {
 
 	restrictedNamespace := operatorCfg.Namespace.Restricted
 	isClusterWide := restrictedNamespace == ""
-	if !isClusterWide {
+	if restrictedNamespace != "" {
 		mgrOpts.Cache.DefaultNamespaces = map[string]cache.Config{
 			restrictedNamespace: {},
 		}
@@ -291,10 +291,10 @@ func main() {
 
 		banner := strings.Repeat("=", 80)
 		setupLog.Error(nil, banner)
-		setupLog.Error(nil, "DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production")
-		setupLog.Error(nil, "The operator is running with namespace-restricted reconciliation",
+		setupLog.Error(nil, "DEVELOPMENT AND TESTING ONLY: Namespace-restricted mode is not supported for production.")
+		setupLog.Error(nil, "The operator is running in namespace-restricted mode",
 			"namespace", restrictedNamespace)
-		setupLog.Error(nil, "Use cluster-wide mode for production deployments")
+		setupLog.Error(nil, "Use cluster-wide mode for production deployments.")
 		setupLog.Error(nil, banner)
 	} else {
 		setupLog.Info("No restricted namespace configured, launching in cluster-wide mode")
@@ -329,22 +329,25 @@ func main() {
 		}
 	}
 
-	// Leases transfer reconciliation ownership. Cluster-wide admission consumes
-	// their feature snapshots and operator identities but never delegates validation.
+	// Cluster-wide mode watches namespace ownership Leases. Admission always runs,
+	// but resolves feature gates and operator identity from an active Lease.
 	var leaseWatcher *namespace_scope.LeaseWatcher
 	if isClusterWide {
-		setupLog.Info("Setting up namespace reconciliation lease watcher")
+		setupLog.Info("Setting up namespace scope marker lease watcher for cluster-wide mode")
 
 		leaseWatcher, err = namespace_scope.NewLeaseWatcher(mgr.GetConfig())
 		if err != nil {
-			setupLog.Error(err, "unable to create namespace reconciliation lease watcher")
+			setupLog.Error(err, "unable to create namespace scope marker lease watcher")
 			os.Exit(1)
 		}
 		if err = leaseWatcher.Start(mainCtx); err != nil {
-			setupLog.Error(err, "unable to start namespace reconciliation lease watcher")
+			setupLog.Error(err, "unable to start namespace scope marker lease watcher")
 			os.Exit(1)
 		}
 
+		setupLog.Info("Namespace scope marker lease watcher started successfully")
+
+		// Pass leaseWatcher to runtime config for namespace exclusion filtering.
 		runtimeConfig.ExcludedNamespaces = leaseWatcher
 	}
 
@@ -526,7 +529,7 @@ func main() {
 			setupLog.Error(err, "unable to create namespace reconciliation lease manager")
 			os.Exit(1)
 		}
-		if err = mgr.Add(leaseManager); err != nil {
+		if err = mgr.Add(namespace_scope.WithLeaderElection(leaseManager)); err != nil {
 			setupLog.Error(err, "unable to register namespace reconciliation lease manager")
 			os.Exit(1)
 		}
@@ -538,7 +541,7 @@ func main() {
 	// refresh whenever a secret is created/deleted/updated
 	// Set up informer
 	var factory informers.SharedInformerFactory
-	if isClusterWide {
+	if restrictedNamespace == "" {
 		factory = informers.NewSharedInformerFactory(kubernetes.NewForConfigOrDie(mgr.GetConfig()), time.Hour*24)
 	} else {
 		factory = informers.NewSharedInformerFactoryWithOptions(

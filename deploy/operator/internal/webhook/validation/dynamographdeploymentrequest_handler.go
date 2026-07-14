@@ -118,7 +118,9 @@ func (h *DynamoGraphDeploymentRequestHandler) ValidateDelete(ctx context.Context
 }
 
 // RegisterWithManager registers the webhook with the manager.
+// The handler is automatically wrapped with FeatureAwareValidator to resolve namespace gates.
 func (h *DynamoGraphDeploymentRequestHandler) RegisterWithManager(mgr manager.Manager) error {
+	// Wrap the handler with namespace-aware feature resolution.
 	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(h, internalwebhook.FeatureResolver())
 
 	// Wrap with metrics collection

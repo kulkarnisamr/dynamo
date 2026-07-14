@@ -34,4 +34,5 @@ spec:
   selector:
     control-plane: controller-manager
   {{- include "dynamo-operator.selectorLabels" . | nindent 4 }}
+
 {{- end }}

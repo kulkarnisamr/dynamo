@@ -146,7 +146,8 @@ func (h *DynamoComponentDeploymentHandler) validateDelete(
 }
 
 // RegisterWithManager registers the webhook with the manager.
-// The handler is wrapped with namespace feature resolution and metrics collection.
+// The handler is automatically wrapped with FeatureAwareValidator to resolve namespace gates
+// and ObservedValidator to add metrics collection.
 func (h *DynamoComponentDeploymentHandler) RegisterWithManager(mgr manager.Manager) error {
 	h.registerWithManager(
 		mgr,
@@ -173,7 +174,10 @@ func (h *DynamoComponentDeploymentHandler) registerWithManager(
 	path string,
 	validator admission.CustomValidator,
 ) {
+	// Wrap the handler with namespace-aware feature resolution.
 	featureAwareValidator := internalwebhook.NewFeatureAwareValidator(validator, internalwebhook.FeatureResolver())
+
+	// Wrap with metrics collection.
 	observedValidator := observability.NewObservedValidator(featureAwareValidator, consts.ResourceTypeDynamoComponentDeployment)
 
 	webhook := admission.

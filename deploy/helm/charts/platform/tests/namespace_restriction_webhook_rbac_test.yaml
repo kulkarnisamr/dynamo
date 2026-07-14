@@ -4,8 +4,10 @@
 suite: namespace restriction webhook RBAC
 templates:
   - charts/dynamo-operator/templates/webhook-rbac.yaml
+  - charts/dynamo-operator/templates/manager-rbac.yaml
 tests:
-  - it: gives cluster-wide API mutation permissions only to the cluster-wide operator
+  - it: allows the cluster-wide operator to patch CRD conversion CA bundles
+    template: charts/dynamo-operator/templates/webhook-rbac.yaml
     asserts:
       - contains:
           path: rules
@@ -23,9 +25,33 @@ tests:
         documentIndex: 2
 
   - it: renders no webhook RBAC for a namespaced operator
+    template: charts/dynamo-operator/templates/webhook-rbac.yaml
     set:
       dynamo-operator.namespaceRestriction.enabled: true
       dynamo-operator.upgradeCRD: false
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: omits cluster-scoped admission and CRD rules from the namespace-restricted manager Role
+    template: charts/dynamo-operator/templates/manager-rbac.yaml
+    set:
+      dynamo-operator.namespaceRestriction.enabled: true
+      dynamo-operator.upgradeCRD: false
+    asserts:
+      - notContains:
+          path: rules
+          content:
+            apiGroups:
+              - apiextensions.k8s.io
+            resources:
+              - customresourcedefinitions
+            verbs:
+              - create
+              - delete
+              - get
+              - list
+              - patch
+              - update
+              - watch
+        documentIndex: 0

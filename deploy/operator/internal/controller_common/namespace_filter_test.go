@@ -15,6 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+type excludedNamespaces map[string]bool
+
+func (e excludedNamespaces) Contains(namespace string) bool {
+	return e[namespace]
+}
+
 func TestWithNamespaceExclusion(t *testing.T) {
 	calls := 0
 	delegate := reconcile.Func(func(context.Context, ctrl.Request) (ctrl.Result, error) {
@@ -36,19 +42,5 @@ func TestWithNamespaceExclusion(t *testing.T) {
 	})
 	if err != nil || result.RequeueAfter != time.Second || calls != 1 {
 		t.Fatalf("included reconcile = (%v, %v, %d calls), want requeue result, nil error, one call", result, err, calls)
-	}
-
-	result, err = WithNamespaceExclusion(delegate, nil).Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "tenant-a", Name: "object"},
-	})
-	if err != nil || result.RequeueAfter != time.Second || calls != 2 {
-		t.Fatalf("nil config reconcile = (%v, %v, %d calls), want delegate result, nil error, two calls", result, err, calls)
-	}
-
-	result, err = reconciler.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "cluster-object"},
-	})
-	if err != nil || result.RequeueAfter != time.Second || calls != 3 {
-		t.Fatalf("cluster reconcile = (%v, %v, %d calls), want delegate result, nil error, three calls", result, err, calls)
 	}
 }

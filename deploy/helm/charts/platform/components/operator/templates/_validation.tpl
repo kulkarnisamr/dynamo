@@ -14,8 +14,8 @@
 # limitations under the License.
 
 {{/*
-Validation to prevent operator conflicts. Namespace reconciliation leases allow
-the cluster-wide operator to avoid namespaces managed by namespaced operators.
+Validation to prevent operator conflicts. Namespace ownership leases allow the cluster-wide
+operator to avoid namespaces managed by namespace-restricted operators.
 
 This validation only prevents:
 1. Multiple cluster-wide operators (would compete for the same resources)
@@ -72,9 +72,9 @@ This validation only prevents:
     {{- end -}}
 
     {{- if $existingOperatorNamespace -}}
-      {{- fail (printf "VALIDATION ERROR: Found existing cluster-wide Dynamo operator from release '%s' in namespace '%s' (ClusterRole: %s). Only one cluster-wide Dynamo operator should be deployed per cluster. Either:\n1. Use the existing cluster-wide operator (no need to install another), or\n2. Uninstall the existing cluster-wide operator first: %s\n\nNote: A namespace-restricted operator may coexist when installed with --skip-crds, namespaceRestriction.enabled=true, and upgradeCRD=false." $existingOperatorRelease $existingOperatorNamespace $existingOperatorRoleName $uninstallCmd) -}}
+      {{- fail (printf "VALIDATION ERROR: Found existing cluster-wide Dynamo operator from release '%s' in namespace '%s' (ClusterRole: %s). Only one cluster-wide Dynamo operator should be deployed per cluster. Either:\n1. Use the existing cluster-wide operator (no need to install another), or\n2. Uninstall the existing cluster-wide operator first: %s\n\nNote: For development and testing, a namespace-restricted operator may coexist when installed with --skip-crds, namespaceRestriction.enabled=true, and upgradeCRD=false." $existingOperatorRelease $existingOperatorNamespace $existingOperatorRoleName $uninstallCmd) -}}
     {{- else -}}
-      {{- fail (printf "VALIDATION ERROR: Found existing cluster-wide Dynamo operator from release '%s' (ClusterRole: %s). Only one cluster-wide Dynamo operator should be deployed per cluster. Either:\n1. Use the existing cluster-wide operator (no need to install another), or\n2. Uninstall the existing cluster-wide operator first: %s\n\nNote: A namespace-restricted operator may coexist when installed with --skip-crds, namespaceRestriction.enabled=true, and upgradeCRD=false." $existingOperatorRelease $existingOperatorRoleName $uninstallCmd) -}}
+      {{- fail (printf "VALIDATION ERROR: Found existing cluster-wide Dynamo operator from release '%s' (ClusterRole: %s). Only one cluster-wide Dynamo operator should be deployed per cluster. Either:\n1. Use the existing cluster-wide operator (no need to install another), or\n2. Uninstall the existing cluster-wide operator first: %s\n\nNote: For development and testing, a namespace-restricted operator may coexist when installed with --skip-crds, namespaceRestriction.enabled=true, and upgradeCRD=false." $existingOperatorRelease $existingOperatorRoleName $uninstallCmd) -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
@@ -93,7 +93,7 @@ This validation only prevents:
 Validation for configuration consistency
 */}}
 {{- define "dynamo-operator.validateConfiguration" -}}
-{{/* Namespace-restricted operators must never install or mutate cluster-wide APIs. */}}
+{{/* Namespace-restricted operators must never install or update cluster-wide APIs. */}}
 {{- if and .Values.namespaceRestriction.enabled .Values.upgradeCRD -}}
   {{- fail "VALIDATION ERROR: namespaceRestriction.enabled=true is incompatible with upgradeCRD=true. Set upgradeCRD=false and install the namespaced release with --skip-crds so it does not install or update cluster-wide CRDs." -}}
 {{- end -}}
