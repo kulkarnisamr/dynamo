@@ -107,3 +107,4 @@ spec:
     name: {{ include "dynamo-operator.fullname" . }}-ca-issuer
     kind: Issuer
 {{- end }}
+
