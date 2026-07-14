@@ -423,7 +423,9 @@ impl RuntimeConfigBuilder {
 // lives in the zero-dependency `dynamo-truthy` crate so that crates which
 // cannot depend on `dynamo-runtime` share it too; this re-export is the
 // canonical import path for everything that can.
-pub use dynamo_truthy::{env_is_falsey, env_is_truthy, is_falsey, is_truthy, parse_bool};
+pub use dynamo_truthy::{
+    env_is_falsey, env_is_truthy, is_falsey, is_truthy, parse_bool, parse_bool_opt,
+};
 
 /// Check whether JSONL logging enabled
 /// Set the `DYN_LOGGING_JSONL` environment variable a [`is_truthy`] value

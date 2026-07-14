@@ -149,7 +149,7 @@ async fn resolve_zmq_broker(
 
         if xsub_endpoints.is_empty() {
             anyhow::bail!(
-                "DYN_ZMQ_BROKER_ENABLED=true but no broker found in discovery for namespace '{}'",
+                "DYN_ZMQ_BROKER_ENABLED is set but no broker found in discovery for namespace '{}'",
                 scope.namespace()
             );
         }

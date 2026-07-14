@@ -171,6 +171,7 @@
 /lib/llm/                                                                                     @ai-dynamo/dynamo-runtime-codeowners
 /lib/bench/                                                                                   @ai-dynamo/dynamo-performance-codeowners
 /lib/mocker/                                                                                  @ai-dynamo/dynamo-performance-codeowners
+/lib/truthy/                                                                                  @ai-dynamo/dynamo-runtime-codeowners
 /lib/runtime/                                                                                 @ai-dynamo/dynamo-runtime-codeowners
 /lib/data-gen/                                                                                @ai-dynamo/dynamo-performance-codeowners
 /lib/kv-router/                                                                               @ai-dynamo/dynamo-router-codeowners

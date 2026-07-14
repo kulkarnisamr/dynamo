@@ -53,6 +53,30 @@ pub fn parse_bool(val: &str) -> anyhow::Result<bool> {
     }
 }
 
+/// Tri-state parse for call sites that preserve their own default unless the
+/// value is a deliberate boolean choice.
+///
+/// Unlike [`parse_bool`], an empty (or whitespace-only) value yields `None` —
+/// a variable declared without a value (common in Kubernetes manifests and
+/// Docker Compose files) must not override a default — and so does any
+/// unrecognized value.
+///
+/// # Returns
+/// * `Some(true)` - for truthy values ([`is_truthy`])
+/// * `Some(false)` - for `0 | false | off | no`
+/// * `None` - for empty or unrecognized values
+pub fn parse_bool_opt(val: &str) -> Option<bool> {
+    if is_truthy(val) {
+        Some(true)
+    } else if val.trim().is_empty() {
+        None
+    } else if is_falsey(val) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Check if an environment variable is set to a truthy value.
 /// Unset (or non-unicode) variables are not truthy.
 pub fn env_is_truthy(env: &str) -> bool {
@@ -109,6 +133,24 @@ mod tests {
             assert!(!is_truthy(val), "value={val:?}");
             assert!(!is_falsey(val), "value={val:?}");
             assert!(parse_bool(val).is_err(), "value={val:?}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_opt_spellings() {
+        for val in TRUTHY {
+            assert_eq!(parse_bool_opt(val), Some(true), "value={val:?}");
+        }
+        for val in FALSEY {
+            let expected = if val.trim().is_empty() {
+                None // declared-but-empty is not a deliberate choice
+            } else {
+                Some(false)
+            };
+            assert_eq!(parse_bool_opt(val), expected, "value={val:?}");
+        }
+        for val in NEITHER {
+            assert_eq!(parse_bool_opt(val), None, "value={val:?}");
         }
     }
 

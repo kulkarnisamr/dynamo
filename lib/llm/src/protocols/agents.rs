@@ -101,5 +101,5 @@ pub(crate) fn session_affinity_header_value(headers: &HeaderMap) -> Option<Strin
 
 fn header_bool(headers: &HeaderMap, header_name: &str) -> Option<bool> {
     let value = header_value(headers, header_name)?;
-    dynamo_runtime::config::parse_bool(&value).ok()
+    dynamo_runtime::config::parse_bool_opt(&value)
 }

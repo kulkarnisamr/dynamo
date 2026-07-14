@@ -118,7 +118,8 @@ fn kv_router_config_from_lookup(get_env: impl Fn(&str) -> Option<String>) -> KvR
     }
 
     fn parse_bool(get_env: &impl Fn(&str) -> Option<String>, key: &str) -> Option<bool> {
-        get_env(key).and_then(|value| dynamo_truthy::parse_bool(&value).ok())
+        // Empty or unrecognized values yield None so the default is preserved.
+        get_env(key).and_then(|value| dynamo_truthy::parse_bool_opt(&value))
     }
 
     let mut config = KvRouterConfig::default();
