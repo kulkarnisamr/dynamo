@@ -1825,7 +1825,7 @@ async fn response_format_qwen3_prompt_injected_reasoning_then_json_preserves_cha
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, true, false)
+        .postprocessor_parsing_stream(input_stream, &request, true, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1849,7 +1849,7 @@ async fn response_format_qwen3_prompt_injected_bare_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, true, false)
+        .postprocessor_parsing_stream(input_stream, &request, true, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1874,7 +1874,7 @@ async fn response_format_qwen3_no_thinking_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1897,7 +1897,7 @@ async fn response_format_gemma4_bare_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1924,7 +1924,7 @@ async fn response_format_minimax_append_think_bare_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1951,7 +1951,7 @@ async fn response_format_gpt_oss_bare_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -1977,7 +1977,7 @@ async fn response_format_gpt_oss_json_object_bare_json_stays_content() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
@@ -2006,7 +2006,7 @@ async fn response_format_gpt_oss_reasoning_then_json_preserves_channels() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning, content, ..
