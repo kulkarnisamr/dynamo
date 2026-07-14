@@ -89,8 +89,11 @@ helm install dynamo-test dynamo-platform-${RELEASE_VERSION}.tgz \
   --set dynamo-operator.controllerManager.manager.image.tag=v2.0.0-beta
 ```
 
-Set `namespaceRestriction.targetNamespace` when the reconciliation target differs from the Helm
-release namespace.
+Set `dynamo-operator.namespaceRestriction.targetNamespace` when the reconciliation target differs
+from the Helm release namespace.
+
+Install every operator Helm release in a separate namespace. Multiple Dynamo operator releases in
+the same Helm release namespace are not supported.
 
 Every released namespaced operator requires a cluster-wide operator of the same or a newer
 version that ships the newest APIs in the cluster. A 1.3 namespaced operator is not

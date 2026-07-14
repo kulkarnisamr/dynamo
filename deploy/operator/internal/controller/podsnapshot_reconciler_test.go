@@ -778,7 +778,7 @@ func TestPodSnapshotContentEventFilter(t *testing.T) {
 		{name: "restricted mode admits matching snapshot ref namespace", restricted: "prod", obj: contentWithRefNamespace("prod"), want: true},
 		{name: "restricted mode drops mismatched snapshot ref namespace", restricted: "prod", obj: contentWithRefNamespace("other"), want: false},
 		{name: "restricted mode drops empty snapshot ref namespace", restricted: "prod", obj: contentWithRefNamespace(""), want: false},
-		{name: "cluster-wide drops excluded snapshot ref namespace", excluded: []string{"banned"}, obj: contentWithRefNamespace("banned"), want: false},
+		{name: "cluster-wide keeps excluded snapshot ref namespace for the reconciliation wrapper", excluded: []string{"banned"}, obj: contentWithRefNamespace("banned"), want: true},
 		{name: "cluster-wide drops ephemeral snapshot ref namespace", obj: contentWithRefNamespace("ci-ephemeral-1"), want: false},
 		{name: "cluster-wide admits normal snapshot ref namespace", obj: contentWithRefNamespace("prod"), want: true},
 		{name: "non-content object is dropped", restricted: "prod", obj: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "p"}}, want: false},
