@@ -120,11 +120,10 @@ async fn resolve_zmq_broker(
         }));
     }
 
-    // Priority 2: Discovery-based lookup if DYN_ZMQ_BROKER_ENABLED=true
-    if std::env::var(crate::config::environment_names::zmq_broker::DYN_ZMQ_BROKER_ENABLED)
-        .unwrap_or_default()
-        == "true"
-    {
+    // Priority 2: Discovery-based lookup if DYN_ZMQ_BROKER_ENABLED is truthy
+    if crate::config::env_is_truthy(
+        crate::config::environment_names::zmq_broker::DYN_ZMQ_BROKER_ENABLED,
+    ) {
         let query = DiscoveryQuery::EventChannels(EventChannelQuery::component(
             scope.namespace().to_string(),
             "zmq_broker".to_string(),
