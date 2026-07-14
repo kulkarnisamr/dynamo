@@ -1862,7 +1862,7 @@ async fn tool_choice_minimax_m2_required_keeps_reasoning_before_tool_xml() {
         .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, true, false)
+        .postprocessor_parsing_stream(input_stream, &request, true, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning,
@@ -1888,7 +1888,7 @@ async fn tool_choice_minimax_m2_required_bare_json_bypasses_reasoning() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, true, false)
+        .postprocessor_parsing_stream(input_stream, &request, true, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning,
@@ -1918,7 +1918,7 @@ async fn tool_choice_minimax_m2_required_thinking_disabled_keeps_tool_xml() {
             .map(Annotated::from_data),
     );
     let output_stream = preprocessor
-        .postprocessor_parsing_stream(input_stream, &request, false, false)
+        .postprocessor_parsing_stream(input_stream, &request, false, false, true)
         .expect("postprocessor_parsing_stream should build");
     let DrainOutput {
         reasoning,

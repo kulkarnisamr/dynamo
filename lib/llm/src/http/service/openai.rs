@@ -2431,7 +2431,7 @@ async fn responses(
         ),
     );
 
-    // NOTE: DIS-2322's move-reasoning-into-content fix is scoped to
+    // NOTE: the move-reasoning-into-content fix is scoped to
     // /v1/chat/completions. It is intentionally NOT wired here: this handler
     // pre-forces the converted chat request to stream=true, so the preprocessor
     // sees a streaming request and disables reasoning parsing for
