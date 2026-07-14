@@ -438,13 +438,17 @@ impl DeltaAggregator {
                 // `content_parts` (multimodal) counts as content too — `From<DeltaChoice>`
                 // prefers parts over `text`, so moving reasoning into `text` here would be
                 // dropped. Only move when there is no content of either kind.
-                if choice.text.is_empty()
+                // Whitespace-only text counts as empty — matching vLLM's
+                // NemotronV3ReasoningParser (`not final_content.strip()`): a
+                // trailing newline after `</think>` must not block the move and
+                // leave semantically empty content.
+                if choice.text.trim().is_empty()
                     && choice.content_parts.is_empty()
                     && !has_tool_calls
                     && choice
                         .reasoning_content
                         .as_deref()
-                        .is_some_and(|r| !r.is_empty())
+                        .is_some_and(|r| !r.trim().is_empty())
                 {
                     choice.text = choice.reasoning_content.take().unwrap_or_default();
                 }
@@ -737,6 +741,24 @@ mod tests {
         // Fixed: with the flag, reasoning is moved into content and cleared.
         let opts = ParsingOptions::default().with_move_reasoning_to_content_when_empty(true);
         let resp = DeltaAggregator::apply(reasoning_only(), opts.clone())
+            .await
+            .unwrap();
+        let msg = &resp.inner.choices[0].message;
+        assert_eq!(
+            msg.content.as_ref().unwrap(),
+            &ChatCompletionMessageContent::Text("Let me think.".to_string()),
+        );
+        assert_eq!(msg.reasoning_content, None);
+
+        // Whitespace-only content counts as empty (a trailing newline after
+        // `</think>` from the incremental parser) — matches vLLM's
+        // `not final_content.strip()` check; the move must still fire.
+        let whitespace_content = Box::pin(stream::iter(vec![create_reasoning_delta(
+            0,
+            "\n",
+            "Let me think.",
+        )]));
+        let resp = DeltaAggregator::apply(whitespace_content, opts.clone())
             .await
             .unwrap();
         let msg = &resp.inner.choices[0].message;

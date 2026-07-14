@@ -2810,9 +2810,21 @@ impl OpenAIPreprocessor {
         chat_template_args: Option<&std::collections::HashMap<String, serde_json::Value>>,
     ) -> bool {
         Self::is_nemotron_force_reasoning(reasoning_parser)
-            && chat_template_args.is_some_and(|args| {
-                args.get("force_nonempty_content") == Some(&serde_json::Value::Bool(true))
-            })
+            && Self::requests_force_nonempty_content(chat_template_args)
+    }
+
+    /// True when the request's `chat_template_args` contain
+    /// `force_nonempty_content: true` — the Nemotron chat-template kwarg
+    /// promising non-empty `content`. Shared by the streaming disable-gate
+    /// (`is_reasoning_disabled_by_request`) and the non-streaming move flag
+    /// (`wants_reasoning_as_content_when_empty`) so both halves of the
+    /// force_nonempty_content handling fire on the same request condition.
+    fn requests_force_nonempty_content(
+        chat_template_args: Option<&std::collections::HashMap<String, serde_json::Value>>,
+    ) -> bool {
+        chat_template_args.is_some_and(|args| {
+            args.get("force_nonempty_content") == Some(&serde_json::Value::Bool(true))
+        })
     }
 
     /// Parsers that begin streaming in reasoning mode (force_reasoning=true).
@@ -2955,10 +2967,7 @@ impl OpenAIPreprocessor {
                     // reasoning parsing ON and instead move reasoning into content
                     // only when no content was generated, done in the aggregator via
                     // ParsingOptions::move_reasoning_to_content_when_empty.
-                    if is_streaming
-                        && let Some(force_nonempty) = args.get("force_nonempty_content")
-                        && force_nonempty == &serde_json::Value::Bool(true)
-                    {
+                    if is_streaming && Self::requests_force_nonempty_content(chat_template_args) {
                         return true;
                     }
                 }
