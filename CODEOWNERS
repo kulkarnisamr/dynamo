@@ -182,12 +182,12 @@
 /lib/llm/src/kv.rs                                                                            @ai-dynamo/dynamo-kv-memory-codeowners
 /lib/llm/src/lora/                                                                            @ai-dynamo/dynamo-frontend-codeowners
 /dev/observability/                                                                           @ai-dynamo/dynamo-observability-codeowners
+/lib/sglang-remote/                                                                           @ai-dynamo/dynamo-backend-sglang-codeowners
 /deploy/power-agent/                                                                          @ai-dynamo/dynamo-runtime-codeowners
 /lib/backend-common/                                                                          @ai-dynamo/dynamo-runtime-codeowners
 /lib/llm/src/grpc.rs                                                                          @ai-dynamo/dynamo-frontend-codeowners
 /lib/llm/src/http.rs                                                                          @ai-dynamo/dynamo-frontend-codeowners
 /lib/llm/src/lora.rs                                                                          @ai-dynamo/dynamo-frontend-codeowners
-/lib/sglang-remote/                                                                           @ai-dynamo/dynamo-backend-sglang-codeowners
 /lib/bindings/python/                                                                         @ai-dynamo/dynamo-runtime-codeowners
 /lib/vllm-rs-backend/                                                                         @ai-dynamo/dynamo-backend-vllm-codeowners
 /deploy/observability/                                                                        @ai-dynamo/dynamo-observability-codeowners
