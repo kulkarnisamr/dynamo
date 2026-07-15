@@ -303,4 +303,4 @@ impl MemoryRegion {
 // Canonical truthy/bool parsing, re-exported from the shared `dynamo-truthy`
 // crate (this crate cannot depend on `dynamo-runtime`, whose `config` module
 // re-exports the same helpers).
-pub use dynamo_truthy::{env_is_truthy, parse_bool};
+pub use dynamo_truthy::{env_is_truthy, parse_bool, parse_bool_opt};
